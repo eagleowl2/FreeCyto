@@ -158,6 +158,123 @@ This log tracks the implementation stages of the FreeCyto (OpenCyto Studio) MVP.
 
 ---
 
+## 2026‑03‑04 – Review-driven hardening (Phase 1–3)
+
+This section tracks the fixes applied in response to the MVP code review
+(`FreeCyto_MVP_Review`), grouped by the review's phases.
+
+### Phase 1 – Danger issues
+
+- **D‑1 – Wide-open CORS on local API**
+  - Tightened CORS configuration in `backend/main.py`:
+    - Added `ALLOWED_ORIGINS = ["null", "http://localhost:5173", "http://127.0.0.1:5173"]`.
+    - CORS middleware now uses `allow_origins=ALLOWED_ORIGINS`, `allow_methods=["GET","POST","DELETE"]`,
+      `allow_headers=["Content-Type"]`, `allow_credentials=False`.
+  - Effect: only the Electron renderer (file:// origin) and the Vite dev server can call the API.
+
+- **D‑2 – Compensation overwrites raw events**
+  - Refactored `services/storage.py` to introduce a `FileRecord` dataclass with:
+    - `metadata`, immutable `raw_events`, optional `comp_events`, `comp_matrix`, `cond`,
+      and `is_compensated` flag.
+  - `get_file_events(file_id)` now returns `comp_events` when `is_compensated` is `True`,
+    otherwise `raw_events`.
+  - `services/compensation.py` now:
+    - Uses `np.linalg.solve(spillover.T, events.T).T` instead of `inv(spillover)`.
+    - Computes and stores the spillover matrix condition number.
+    - Populates `comp_events` and compensation metadata via `storage.set_compensation`.
+  - Added compensation endpoints in `routers/compensation.py`:
+    - `POST /api/compensation/apply` – apply matrix and return summary.
+    - `DELETE /api/compensation/{file_id}` – reset to raw events.
+    - `GET /api/compensation/status/{file_id}` – report `{file_id,is_compensated,n_channels,cond}`.
+
+### Phase 2 – Architecture
+
+- **A‑1 – In-memory store has no eviction**
+  - Implemented `FileStore` LRU cache in `services/storage.py`:
+    - Uses `OrderedDict[str, FileRecord]` plus `bytes_used` and a memory cap
+      `MAX_CACHE_BYTES = int(os.getenv("OPENCYTO_CACHE_MB","2048")) * 1024**2`.
+    - `add(file_id, record)` evicts oldest records until there is room.
+  - New APIs in `routers/files.py`:
+    - `DELETE /api/files/{file_id}` – evict a file from cache.
+    - `GET /api/files/cache/status` – return `{bytes_used,max_bytes,file_count}`.
+
+- **A‑2 – File IDs not stable across sessions**
+  - Added `stable_file_id(path: Path)` in `services/fcs_parser.py`:
+    - Computes SHA‑256 on the first 64 KB of file content and uses the first 16 hex
+      characters as the file ID.
+  - `_extract_metadata()` now assigns `file_id = stable_file_id(path)`; IDs are stable
+    across restarts and independent of filesystem path.
+
+- **A‑3 – SVG scatter plot will not scale**
+  - Introduced a WebGL renderer using deck.gl:
+    - Added `@deck.gl/core`, `@deck.gl/react`, `@deck.gl/layers` to `frontend/package.json`.
+    - Created `frontend/src/WebGLScatter.tsx` that renders points via a `ScatterplotLayer`.
+  - Updated `App.tsx`:
+    - Replaced per-event SVG `<circle>` rendering with `<WebGLScatter>` for dots.
+    - Retained a lightweight SVG overlay for axes/border and status text only.
+  - Result: the DOM no longer contains tens of thousands of `<circle>` elements; dots are
+    GPU‑rendered and ready for interactive gating.
+
+- **A‑4 – No error boundaries / silent failures**
+  - Backend:
+    - Added a global `@app.exception_handler(Exception)` in `backend/main.py` which:
+      - Logs the error (method and URL) via the `opencyto` logger.
+      - Returns JSON `{"detail": str(exc), "type": type(exc).__name__}` with HTTP 500.
+    - All router code now consistently wraps unexpected conditions in `HTTPException`
+      with meaningful `detail` strings.
+  - Frontend:
+    - `App.tsx` already uses `fcsError` to surface message text above the plot; when
+      no points are available the SVG overlay shows a “Failed to load events: …”
+      message instead of a blank panel. (A more formal `useEvents` hook / error
+      boundary remains a future improvement.)
+
+- **A‑5 – Path text input for file loading**
+  - Electron:
+    - `frontend/electron/preload.js` now exposes:
+      - `window.opencyto.openFcsFiles()` via `ipcRenderer.invoke("dialog:openFcsFiles")`.
+    - `frontend/electron/main.js` registers `ipcMain.handle("dialog:openFcsFiles", ...)`
+      which:
+      - Opens a native file dialog restricted to `.fcs` and `.lmd`.
+      - Allows multi‑selection and returns `filePaths`.
+  - Frontend UI:
+    - `App.tsx` replaces the free‑text path `<input>` with a readonly field and a
+      **“Browse FCS…”** button that:
+      - Invokes `openFcsFiles()`.
+      - Updates `fcsPath` and calls `handleLoadFcs(selectedPath)`.
+  - Backend:
+    - `load_fcs_file()` in `services/fcs_parser.py` now rejects unsupported
+      extensions before opening the file (`.fcs`/`.lmd` only).
+
+### Phase 3 – Backend scientific correctness
+
+- **B‑1 – Exact logicle transform**
+  - Added `logicle` to backend requirements.
+  - Replaced the approximate logicle in `services/transforms.py` with:
+    - `Logicle(T,W,M,A).transform(values)` from the `logicle` package.
+  - Added `estimate_logicle_params(channel_data)` implementing a Bagwell-style
+    heuristic for T and W based on the data distribution.
+
+- **B‑2 – Transform state persistence scaffolding**
+  - Created `models/transform_models.py` with `ChannelTransform` model capturing:
+    - Channel name, transform type, arcsinh cofactor, and logicle T/W/M/A.
+  - Extended `FileRecord` in `services/storage.py` with an `active_transforms` map
+    ready to store per-channel transform state for gating/workspace persistence.
+
+- **B‑3 – Linux/macOS backend entry point**
+  - Added `backend/run.sh`:
+    - Creates a virtualenv and installs requirements on first run.
+    - Always starts `main.py` via the venv.
+  - Added a root `Makefile` with:
+    - `dev-backend`, `dev-frontend`, and `dev` targets for consistent developer UX.
+
+- **B‑4 – FCS test corpus scaffolding**
+  - Created `tests/fixtures/README.md` documenting how to assemble a reference FCS
+    corpus and expected metrics.
+  - Added a placeholder `tests/test_fcs_parser.py` (marked `@pytest.mark.skip`) to
+    host future regression tests without failing the current test suite.
+
+---
+
 ## Next planned steps (short-term)
 
 These align with the original OpenCyto Studio plan and current momentum:

@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 
 const isDev = !app.isPackaged;
@@ -21,6 +21,15 @@ async function createWindow() {
     await win.loadFile(path.join(__dirname, "..", "index.html"));
   }
 }
+
+ipcMain.handle("dialog:openFcsFiles", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Open FCS Files",
+    filters: [{ name: "FCS Files", extensions: ["fcs", "lmd"] }],
+    properties: ["openFile", "multiSelections"],
+  });
+  return result.filePaths ?? [];
+});
 
 app.whenReady().then(() => {
   void createWindow();

@@ -99,3 +99,18 @@ async def get_events(
   return FileEventsResponse(file_id=file_id, channel_names=channel_names, events=events_list)
 
 
+@router.delete("/{file_id}")
+async def delete_file(file_id: str) -> dict:
+  """Evict a file from the in-memory cache."""
+  try:
+    storage.delete_file(file_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  return {"status": "deleted", "file_id": file_id}
+
+
+@router.get("/cache/status")
+async def cache_status() -> dict:
+  """Return basic cache usage information."""
+  return storage.get_cache_status()
+

@@ -58,3 +58,10 @@ class CompensationApplyResponse(BaseModel):
   n_channels: int
 
 
+class CompensationStatusResponse(BaseModel):
+  file_id: str
+  is_compensated: bool
+  n_channels: int
+  cond: Optional[float] = None
+
+

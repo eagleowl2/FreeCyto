@@ -1,4 +1,5 @@
 import React from "react";
+import { WebGLScatter } from "./WebGLScatter";
 
 type HealthState =
   | { status: "idle" }
@@ -116,8 +117,9 @@ export const App: React.FC = () => {
     [],
   );
 
-  const handleLoadFcs = React.useCallback(async () => {
-    if (!fcsPath.trim()) return;
+  const handleLoadFcs = React.useCallback(async (pathOverride?: string) => {
+    const path = (pathOverride ?? fcsPath).trim();
+    if (!path) return;
     setFcsStatus("loading");
     setFcsError(null);
     setPoints([]);
@@ -138,7 +140,7 @@ export const App: React.FC = () => {
       };
 
       const loadResp = await postJson<LoadResponse>(`${API_BASE}/api/files/load`, {
-        paths: [fcsPath.trim()],
+        paths: [path],
         downsample_events: 50000,
       });
 
@@ -380,21 +382,35 @@ export const App: React.FC = () => {
             <input
               type="text"
               value={fcsPath}
-              onChange={(e) => setFcsPath(e.target.value)}
-              placeholder="C:\\path\\to\\sample.fcs"
+              readOnly
+              placeholder="Select FCS file(s)…"
               style={{
                 flex: 1,
                 padding: "0.5rem 0.65rem",
                 borderRadius: "0.6rem",
                 border: "1px solid rgba(148,163,184,0.6)",
-                backgroundColor: "rgba(15,23,42,0.7)",
+                backgroundColor: "rgba(15,23,42,0.2)",
                 color: "white",
                 fontSize: "0.9rem",
               }}
             />
             <button
               type="button"
-              onClick={() => void handleLoadFcs()}
+              onClick={async () => {
+                try {
+                  const anyGlobal = globalThis as any;
+                  const paths: string[] =
+                    anyGlobal.opencyto?.openFcsFiles
+                      ? await anyGlobal.opencyto.openFcsFiles()
+                      : [];
+                  if (!paths || paths.length === 0) return;
+                  // For now, load the first selected file; later we can batch.
+                  setFcsPath(paths[0]);
+                  await handleLoadFcs(paths[0]);
+                } catch (err) {
+                  setFcsError(err instanceof Error ? err.message : String(err));
+                }
+              }}
               disabled={fcsStatus === "loading"}
               style={{
                 padding: "0.5rem 0.95rem",
@@ -410,7 +426,7 @@ export const App: React.FC = () => {
                 whiteSpace: "nowrap",
               }}
             >
-              {fcsStatus === "loading" ? "Loading…" : "Load FCS"}
+              {fcsStatus === "loading" ? "Loading…" : "Browse FCS…"}
             </button>
           </div>
 
@@ -723,6 +739,7 @@ export const App: React.FC = () => {
 
           <div
             style={{
+              position: "relative",
               borderRadius: "0.9rem",
               background:
                 "radial-gradient(circle at top, rgba(15,23,42,0.9), rgba(15,23,42,1))",
@@ -730,37 +747,23 @@ export const App: React.FC = () => {
               padding: "0.5rem",
             }}
           >
+            <WebGLScatter points={points} width={width} height={height} margin={margin} />
             <svg
               width={width}
               height={height}
               viewBox={`0 0 ${width} ${height}`}
-              style={{ display: "block", width: "100%", height: "auto" }}
+              style={{ display: "block", width: "100%", height: "auto", pointerEvents: "none" }}
             >
               <rect
                 x={margin}
                 y={margin}
                 width={width - 2 * margin}
                 height={height - 2 * margin}
-                fill="#020617"
+                fill="transparent"
                 stroke="#4b5563"
                 strokeWidth={1}
               />
-              {points.length > 0 ? (
-                points.map((p, idx) => {
-                  const x = margin + p.x * (width - 2 * margin);
-                  const y = margin + (1 - p.y) * (height - 2 * margin);
-                  return (
-                    <circle
-                      key={idx}
-                      cx={x}
-                      cy={y}
-                      r={1.2}
-                      fill="#4ade80"
-                      fillOpacity={0.4}
-                    />
-                  );
-                })
-              ) : (
+              {points.length === 0 && (
                 <text
                   x={width / 2}
                   y={height / 2}
@@ -771,8 +774,11 @@ export const App: React.FC = () => {
                 >
                   {fcsStatus === "loading"
                     ? "Loading events…"
+                    : fcsError
+                    ? `Failed to load events: ${fcsError}`
                     : "Load an FCS file to see FSC vs SSC"}
                 </text>
+
               )}
             </svg>
           </div>

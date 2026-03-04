@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import threading
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -20,6 +20,14 @@ class ParsedFile:
 
 
 _lock = threading.Lock()
+
+
+def stable_file_id(path: Path) -> str:
+  """Deterministic ID based on the first 64 KB of file content."""
+  h = hashlib.sha256()
+  with path.open("rb") as f:
+    h.update(f.read(65536))
+  return h.hexdigest()[:16]
 
 
 def _extract_metadata(path: Path, flow: FlowData) -> Tuple[FileMetadata, np.ndarray]:
@@ -67,7 +75,7 @@ def _extract_metadata(path: Path, flow: FlowData) -> Tuple[FileMetadata, np.ndar
   operator = text.get("$OP")
   acquisition_datetime = text.get("$DATE")
 
-  file_id = str(uuid.uuid4())
+  file_id = stable_file_id(path)
 
   metadata = FileMetadata(
     id=file_id,
@@ -86,6 +94,8 @@ def _extract_metadata(path: Path, flow: FlowData) -> Tuple[FileMetadata, np.ndar
 def load_fcs_file(path_str: str) -> ParsedFile:
   """Parse a single FCS file into metadata and event matrix."""
   path = Path(path_str).expanduser().resolve()
+  if path.suffix.lower() not in {".fcs", ".lmd"}:
+    raise FileNotFoundError(f"Unsupported file type: {path}")
   if not path.exists():
     raise FileNotFoundError(path)
 

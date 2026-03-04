@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from logicle import Logicle
 
 
 def transform_linear(x: np.ndarray) -> np.ndarray:
@@ -21,7 +22,7 @@ def transform_arcsinh(
 ) -> np.ndarray:
   """Arcsinh(x / cofactor). cofactor 150 typical for fluorescence, 5 for CyTOF."""
   x = np.asarray(x, dtype=np.float64)
-  return np.arcsinh(x / cofactor) * cofactor
+  return np.arcsinh(x / cofactor)
 
 
 def transform_logicle(
@@ -31,12 +32,25 @@ def transform_logicle(
   m: float = 4.5,
   a: float = 0.0,
 ) -> np.ndarray:
-  """Logicle (biexponential) transform. Uses arcsinh-based approximation for stability."""
+  """Exact logicle transform via the reference implementation."""
   x = np.asarray(x, dtype=np.float64)
-  # Logicle-like: for MVP we use a scaled arcsinh that approximates logicle shape
-  # (linear near 0, log-like for large values). Cofactor from T/W gives similar range.
-  cofactor = t / (10 ** (m * w)) if w > 0 else 150.0
-  return np.arcsinh(np.maximum(x + a, 0) / cofactor) * cofactor
+  scale = Logicle(T=t, W=w, M=m, A=a)
+  return scale.transform(x)
+
+
+def estimate_logicle_params(channel_data: np.ndarray, m: float = 4.5) -> dict:
+  """Bagwell-style heuristic to estimate T and W from data."""
+  data = np.asarray(channel_data, dtype=np.float64)
+  if data.size == 0:
+    return {"T": 262144.0, "W": 0.5, "M": m, "A": 0.0}
+  t = float(np.max(data))
+  neg = data[data < 0]
+  if neg.size == 0:
+    w = 0.5
+  else:
+    r = float(np.percentile(data, 5))
+    w = max(0.0, (m - np.log10(t / abs(r))) / 2)
+  return {"T": t, "W": float(w), "M": m, "A": 0.0}
 
 
 TRANSFORMS = {

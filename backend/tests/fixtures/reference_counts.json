@@ -1,0 +1,23 @@
+{
+  "_comment": "REPRO-5: counts for tests/fixtures/reference.fcs with linear FSC-A vs SSC-A (test uses _rect_request). x_channel/y_channel must be $PnN names from the file, not numeric indices.",
+  "x_channel": "FSC-A",
+  "y_channel": "SSC-A",
+  "gates": [
+    {
+      "name": "Singlets",
+      "x_min": 50000,
+      "y_min": 20000,
+      "x_max": 250000,
+      "y_max": 200000,
+      "expected_count": 177698
+    },
+    {
+      "name": "Lymphocytes",
+      "x_min": 60000,
+      "y_min": 30000,
+      "x_max": 150000,
+      "y_max": 120000,
+      "expected_count": 147662
+    }
+  ]
+}

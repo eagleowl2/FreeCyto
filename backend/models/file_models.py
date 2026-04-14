@@ -17,22 +17,45 @@ class FileLoadRequest(BaseModel):
 
 
 class ChannelMetadata(BaseModel):
+  """Per-channel metadata derived from the FCS TEXT segment.
+
+  `name` (from $PnN) is the stable API contract key. `display_name` is for UI only.
+  """
+
+  name: str = Field(..., description="$PnN – raw instrument name; API contract key")
   index: int = Field(..., description="1-based channel index (Pn)")
-  name: str = Field(..., description="$PnN - short channel name")
-  stain: Optional[str] = Field(None, description="$PnS - fluorochrome / marker name")
-  range: Optional[float] = Field(None, description="$PnR - detector range")
-  amplification: Optional[str] = Field(None, description="$PnE - amplification")
+  stain: Optional[str] = Field(None, description="$PnS – reagent / marker name; None if absent or duplicate of name")
+  display_name: str = Field(
+    "",
+    description="Human-readable label, e.g. 'FL1-A :: CD19' or 'FSC-A' when no stain",
+  )
+  range: Optional[float] = Field(None, description="$PnR – detector range; used as logicle T when present")
+  amplification: Optional[str] = Field(None, description="$PnE – amplification / gain string")
 
 
 class FileMetadata(BaseModel):
+  """Public FCS file metadata used throughout the backend."""
+
   id: str
   path: str
   sample_name: Optional[str] = None
+  event_count: int
+  channels: List[ChannelMetadata]
+
+  # Provenance (informational only; not used in gate logic)
   instrument: Optional[str] = None
   operator: Optional[str] = None
   acquisition_datetime: Optional[str] = None
-  event_count: int
-  channels: List[ChannelMetadata]
+  comment: Optional[str] = None
+
+  # Raw spillover string from $SPILLOVER / $SPILL; parsed by the compensation service.
+  spillover_str: Optional[str] = None
+
+  # Backwards-compatible matrix field for existing callers; prefer spillover_str going forward.
+  spillover: Optional[List[List[float]]] = Field(
+    None,
+    description="(Legacy) spillover matrix; prefer spillover_str + compensation.parse_spillover_from_metadata.",
+  )
 
 
 class FileLoadResponse(BaseModel):
@@ -43,6 +66,23 @@ class FileEventsResponse(BaseModel):
   file_id: str
   channel_names: List[str]
   events: List[List[float]]
+
+
+class FileDensityResponse(BaseModel):
+  """2D density histogram for a pair of channels."""
+
+  file_id: str
+  x_channel: str
+  y_channel: str
+  transform_x: Optional[str] = None
+  transform_y: Optional[str] = None
+  x_min: float
+  x_max: float
+  y_min: float
+  y_max: float
+  bins_x: int
+  bins_y: int
+  counts: List[List[float]]
 
 
 class CompensationApplyRequest(BaseModel):

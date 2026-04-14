@@ -1,0 +1,25 @@
+{
+  "_comment": "Reference gate counts for REPRO-5. Populate x_min/x_max/y_min/y_max from a FlowJo workspace or a verified FreeCyto run, then commit expected_count. Units are in transformed space matching transform_x/transform_y.",
+  "x_channel": "FSC-A",
+  "y_channel": "SSC-A",
+  "gates": [
+    {
+      "name": "Singlets",
+      "x_min": 50000,
+      "y_min": 20000,
+      "x_max": 250000,
+      "y_max": 200000,
+      "expected_count": 0,
+      "_todo": "Replace expected_count=0 with the count from FlowJo or a verified run"
+    },
+    {
+      "name": "Lymphocytes",
+      "x_min": 60000,
+      "y_min": 30000,
+      "x_max": 150000,
+      "y_max": 120000,
+      "expected_count": 0,
+      "_todo": "Replace expected_count=0 with the count from FlowJo or a verified run"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\user837\AppData\Local\Python\pythoncore-3.14-64\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\user837\FreeCyto\backend
+plugins: anyio-4.12.1
+collecting ... collected 22 items
+
+tests/test_backend_workflow.py::TestScienceGateCounts::test_rectangle_exact_count PASSED [  4%]
+tests/test_backend_workflow.py::TestScienceGateCounts::test_rectangle_count_uses_full_events_not_sample PASSED [  9%]
+tests/test_backend_workflow.py::TestScienceGateCounts::test_pct_of_total_formula PASSED [ 13%]
+tests/test_backend_workflow.py::TestScienceGateCounts::test_pct_of_parent_child_gate PASSED [ 18%]
+tests/test_backend_workflow.py::TestScienceGateCounts::test_child_count_never_exceeds_parent PASSED [ 22%]
+tests/test_backend_workflow.py::TestScienceTransforms::test_arcsinh_transform_shifts_gate_boundary PASSED [ 27%]
+tests/test_backend_workflow.py::TestScienceTransforms::test_linear_and_arcsinh_gate_same_file_different_counts PASSED [ 31%]
+tests/test_backend_workflow.py::TestSciencePolygonBoundary::test_point_exactly_on_polygon_edge_is_inside PASSED [ 36%]
+tests/test_backend_workflow.py::TestSciencePolygonBoundary::test_point_outside_polygon_not_counted PASSED [ 40%]
+tests/test_backend_workflow.py::TestLogicTree::test_tree_depth_reported_correctly PASSED [ 45%]
+tests/test_backend_workflow.py::TestLogicTree::test_cascade_delete_removes_all_descendants PASSED [ 50%]
+tests/test_backend_workflow.py::TestLogicTree::test_delete_child_leaves_parent_intact PASSED [ 54%]
+tests/test_backend_workflow.py::TestLogicTree::test_invalid_parent_gate_id_raises PASSED [ 59%]
+tests/test_backend_workflow.py::TestLogicTree::test_duplicate_gate_name_raises PASSED [ 63%]
+tests/test_backend_workflow.py::TestLogicTree::test_depth_limit_50_enforced PASSED [ 68%]
+tests/test_backend_workflow.py::TestLogicCacheInvalidation::test_cache_invalidated_after_compensation PASSED [ 72%]
+tests/test_backend_workflow.py::TestLogicCacheInvalidation::test_sibling_order_stable_after_multiple_creates PASSED [ 77%]
+tests/test_backend_workflow.py::TestReproducibility::test_same_gate_same_count_on_repeated_calls PASSED [ 81%]
+tests/test_backend_workflow.py::TestReproducibility::test_count_unchanged_after_list_gates PASSED [ 86%]
+tests/test_backend_workflow.py::TestReproducibility::test_workspace_round_trip_preserves_counts PASSED [ 90%]
+tests/test_backend_workflow.py::TestReproducibility::test_delete_gate_then_recreate_same_count PASSED [ 95%]
+tests/test_backend_workflow.py::TestReproducibility::test_fcs_fixture_count_matches_reference SKIPPED [100%]
+
+============================== warnings summary ===============================
+models\gate_models.py:63
+  C:\Users\user837\FreeCyto\backend\models\gate_models.py:63: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class GateResponse(BaseModel):
+
+tests/test_backend_workflow.py::TestSciencePolygonBoundary::test_point_exactly_on_polygon_edge_is_inside
+  C:\Users\user837\FreeCyto\backend\services\gates.py:52: RuntimeWarning: invalid value encountered in divide
+    cross = np.where(mask, vx[i] + (vx[i + 1] - vx[i]) * (y - vy[i]) / denom, np.nan)
+
+tests/test_backend_workflow.py::TestSciencePolygonBoundary::test_point_outside_polygon_not_counted
+  C:\Users\user837\FreeCyto\backend\services\gates.py:52: RuntimeWarning: divide by zero encountered in divide
+    cross = np.where(mask, vx[i] + (vx[i + 1] - vx[i]) * (y - vy[i]) / denom, np.nan)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=================================== PASSES ====================================
+=========================== short test summary info ===========================
+PASSED tests/test_backend_workflow.py::TestScienceGateCounts::test_rectangle_exact_count
+PASSED tests/test_backend_workflow.py::TestScienceGateCounts::test_rectangle_count_uses_full_events_not_sample
+PASSED tests/test_backend_workflow.py::TestScienceGateCounts::test_pct_of_total_formula
+PASSED tests/test_backend_workflow.py::TestScienceGateCounts::test_pct_of_parent_child_gate
+PASSED tests/test_backend_workflow.py::TestScienceGateCounts::test_child_count_never_exceeds_parent
+PASSED tests/test_backend_workflow.py::TestScienceTransforms::test_arcsinh_transform_shifts_gate_boundary
+PASSED tests/test_backend_workflow.py::TestScienceTransforms::test_linear_and_arcsinh_gate_same_file_different_counts
+PASSED tests/test_backend_workflow.py::TestSciencePolygonBoundary::test_point_exactly_on_polygon_edge_is_inside
+PASSED tests/test_backend_workflow.py::TestSciencePolygonBoundary::test_point_outside_polygon_not_counted
+PASSED tests/test_backend_workflow.py::TestLogicTree::test_tree_depth_reported_correctly
+PASSED tests/test_backend_workflow.py::TestLogicTree::test_cascade_delete_removes_all_descendants
+PASSED tests/test_backend_workflow.py::TestLogicTree::test_delete_child_leaves_parent_intact
+PASSED tests/test_backend_workflow.py::TestLogicTree::test_invalid_parent_gate_id_raises
+PASSED tests/test_backend_workflow.py::TestLogicTree::test_duplicate_gate_name_raises
+PASSED tests/test_backend_workflow.py::TestLogicTree::test_depth_limit_50_enforced
+PASSED tests/test_backend_workflow.py::TestLogicCacheInvalidation::test_cache_invalidated_after_compensation
+PASSED tests/test_backend_workflow.py::TestLogicCacheInvalidation::test_sibling_order_stable_after_multiple_creates
+PASSED tests/test_backend_workflow.py::TestReproducibility::test_same_gate_same_count_on_repeated_calls
+PASSED tests/test_backend_workflow.py::TestReproducibility::test_count_unchanged_after_list_gates
+PASSED tests/test_backend_workflow.py::TestReproducibility::test_workspace_round_trip_preserves_counts
+PASSED tests/test_backend_workflow.py::TestReproducibility::test_delete_gate_then_recreate_same_count
+SKIPPED [1] tests\test_backend_workflow.py:892: Real FCS fixture not found at tests/fixtures/reference.fcs
+================== 21 passed, 1 skipped, 3 warnings in 0.40s ==================

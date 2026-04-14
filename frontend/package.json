@@ -9,24 +9,38 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"TODO: add ESLint\"",
-    "electron:build": "electron-builder"
+    "electron:build": "electron-builder",
+    "test": "vitest run",
+    "test:unit": "vitest run src/test/transforms/normalisePoints.test.ts src/test/components/AxisTicks.test.tsx",
+    "test:http": "vitest run src/test/transforms/logTransform.http.test.ts",
+    "test:backend-integration": "vitest run src/test/interactions/",
+    "test:all": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@deck.gl/core": "^8.9.0",
-    "@deck.gl/react": "^8.9.0",
-    "@deck.gl/layers": "^8.9.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^5.1.0",
     "@vitejs/plugin-react-swc": "^3.7.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitest/ui": "^3.2.4",
     "concurrently": "^9.0.0",
     "electron": "^29.0.0",
     "electron-builder": "^25.0.0",
+    "happy-dom": "^18.0.1",
+    "jsdom": "^27.0.0",
+    "msw": "^2.11.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.0",
+    "vitest": "^3.2.4",
     "vite": "^5.0.0",
     "wait-on": "^8.0.0"
   }

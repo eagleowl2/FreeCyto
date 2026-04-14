@@ -56,7 +56,8 @@ This README summarises the **current implementation stage** and the planned next
   - `vite.config.ts` – Vite configuration with React plugin
 
 - `docs/`
-  - `PROJECT_LOG.md` – step-by-step project log and roadmap (see below)
+  - `PROJECT_LOG.md` – step-by-step project log
+  - `NEXT_STEPS.md` – MVP next steps and deliverables (recommended read before building)
 
 - `packaging/` – reserved for electron-builder and Python bundling scripts (not yet implemented)
 - `tests/` – pytest placeholder (`test_fcs_parser.py`); `tests/fixtures/README.md` for FCS corpus
@@ -189,18 +190,16 @@ This starts Vite on port 5173 and launches Electron pointing at the dev server.
 
 ## Next planned steps
 
-Short-term roadmap items (taken from the OpenCyto Studio plan and current work):
+See **`docs/NEXT_STEPS.md`** for full deliverables and definition-of-done. Summary:
 
-1. **Compensation UI**
-   - Frontend editor for spillover matrices (load from header, edit manually)
-   - “Apply compensation” toggle and basic pre/post-comp plots
-2. **Gating MVP**
-   - Backend gate engine and `/api/gates/*` endpoints for polygon/rect/threshold
-   - Frontend gate drawing on the scatter plot and live gate stats
-3. **Workspace & persistence**
-   - JSON workspace save/load (`/api/workspace/*`)
-   - Left-hand workspace tree and simple gate hierarchy view
-4. **Packaging**
-   - electron-builder config and Python bundling (conda-pack or PyInstaller)
-   - First installable builds for Windows/macOS/Linux
+| # | Step | Focus |
+|---|------|--------|
+| 1 | **Compensation UI** | Expose `$SPILLOVER` in metadata; “Load from file” / “Reset”; optional table editor and pre/post comparison |
+| 2 | **Gating MVP** | Backend gate models + `/api/gates/*`; frontend gate drawing and live stats (count, %) |
+| 3 | **Workspace & persistence** | JSON save/load (`/api/workspace/*`); restore files, comp, gates, transforms |
+| 0 | **A-4 remaining** | useEvents hook + error boundary (can fold into item 2) |
+| 4 | **Tests** | Pytest (FCS corpus + non-skipped test) + Vitest |
+| 5 | **Packaging** | electron-builder + Python bundling; first installer |
+
+Recommended order: 1 → 2 → 3; 4 in parallel or after; 5 when feature set is stable.
 

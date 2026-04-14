@@ -5,12 +5,15 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from models.file_models import (
+  FileDensityResponse,
   FileEventsResponse,
   FileLoadRequest,
   FileLoadResponse,
   FileMetadata,
 )
-from services import fcs_parser, storage, transforms as transform_service
+from models.gate_models import GateResponse
+from services import fcs_parser, gates as gates_service, storage, transforms as transform_service
+import numpy as np
 
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -27,6 +30,26 @@ async def load_files(body: FileLoadRequest) -> FileLoadResponse:
     raise HTTPException(status_code=500, detail=f"load_files error: {exc!r}") from exc
 
   return FileLoadResponse(files=files)
+
+
+@router.get("/{file_id}/gates", response_model=List[GateResponse])
+async def get_file_gates(file_id: str) -> List[GateResponse]:
+  """Return gate tree for a file (root-level nodes with nested children)."""
+  try:
+    return gates_service.get_gate_tree(file_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/{file_id}/gates")
+async def delete_file_gates(file_id: str) -> dict:
+  """Clear all gates for a file (e.g. on compensation reset or re-load)."""
+  try:
+    storage.get_file_metadata(file_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  gates_service.delete_all_gates_for_file(file_id)
+  return {"status": "deleted", "file_id": file_id, "gates_cleared": True}
 
 
 @router.get("/{file_id}/channels", response_model=FileMetadata)
@@ -97,6 +120,100 @@ async def get_events(
     raise HTTPException(status_code=500, detail=f"serialize events: {exc!r}") from exc
 
   return FileEventsResponse(file_id=file_id, channel_names=channel_names, events=events_list)
+
+
+@router.get("/{file_id}/density", response_model=FileDensityResponse)
+async def get_density(
+  file_id: str,
+  x_channel: str = Query(..., description="Channel name for X axis"),
+  y_channel: str = Query(..., description="Channel name for Y axis"),
+  bins_x: int = Query(200, ge=10, le=512, description="Number of bins along X"),
+  bins_y: int = Query(200, ge=10, le=512, description="Number of bins along Y"),
+  max_events: int = Query(
+    200_000,
+    ge=1,
+    le=1_000_000,
+    description="Maximum events to use when computing density (random downsample for very large files)",
+  ),
+  transform_x: Optional[str] = Query(None, description="linear | log | arcsinh | logicle"),
+  transform_y: Optional[str] = Query(None, description="linear | log | arcsinh | logicle"),
+  arcsinh_cofactor: float = Query(
+    150.0,
+    description="Cofactor for arcsinh (e.g. 150 fluo, 5 CyTOF). Only used when transform_* == 'arcsinh'.",
+  ),
+) -> FileDensityResponse:
+  """Return a 2D density histogram for a pair of channels.
+
+  The histogram is computed in the **transformed** space (after applying any requested
+  per-axis transforms) so that gate coordinates and overlays align with the axes.
+  """
+  try:
+    metadata = storage.get_file_metadata(file_id)
+    events = storage.get_file_events_downsampled(file_id, max_events=max_events)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"density error: {exc!r}") from exc
+
+  # Resolve channel indices
+  channel_by_name = {ch.name: ch for ch in metadata.channels}
+  try:
+    ch_x = channel_by_name[x_channel]
+    ch_y = channel_by_name[y_channel]
+  except KeyError:
+    raise HTTPException(status_code=400, detail="Requested channel(s) not found")
+
+  x = events[:, ch_x.index - 1].astype(float)
+  y = events[:, ch_y.index - 1].astype(float)
+
+  # Apply transforms in the same way as /events
+  kwargs = {"arcsinh_cofactor": arcsinh_cofactor}
+  if transform_x and transform_x in transform_service.TRANSFORMS:
+    x = transform_service.apply_transform(x, transform_x, **kwargs)
+  if transform_y and transform_y in transform_service.TRANSFORMS:
+    y = transform_service.apply_transform(y, transform_y, **kwargs)
+
+  # Compute axis ranges in transformed space; expand degenerate ranges slightly
+  x_min = float(np.min(x))
+  x_max = float(np.max(x))
+  y_min = float(np.min(y))
+  y_max = float(np.max(y))
+
+  if x_max == x_min:
+    delta = 1.0 if x_min == 0 else abs(x_min) * 0.01
+    x_min -= delta
+    x_max += delta
+  if y_max == y_min:
+    delta = 1.0 if y_min == 0 else abs(y_min) * 0.01
+    y_min -= delta
+    y_max += delta
+
+  # 2D histogram; note that numpy.histogram2d expects (x, y) but we pass (y, x)
+  # so that the resulting array is indexed as counts[y_bin, x_bin].
+  counts, x_edges, y_edges = np.histogram2d(
+    y,
+    x,
+    bins=(bins_y, bins_x),
+    range=[[y_min, y_max], [x_min, x_max]],
+  )
+
+  # Convert to Python lists for JSON serialisation (rows = y bins from low→high).
+  counts_list = counts.tolist()
+
+  return FileDensityResponse(
+    file_id=file_id,
+    x_channel=x_channel,
+    y_channel=y_channel,
+    transform_x=transform_x,
+    transform_y=transform_y,
+    x_min=x_min,
+    x_max=x_max,
+    y_min=y_min,
+    y_max=y_max,
+    bins_x=bins_x,
+    bins_y=bins_y,
+    counts=counts_list,
+  )
 
 
 @router.delete("/{file_id}")

@@ -7,7 +7,7 @@ from models.file_models import (
   CompensationApplyResponse,
   CompensationStatusResponse,
 )
-from services import compensation as compensation_service, storage
+from services import compensation as compensation_service, gates as gates_service, storage
 
 
 router = APIRouter(prefix="/api/compensation", tags=["compensation"])
@@ -40,6 +40,7 @@ async def reset_compensation(file_id: str) -> CompensationStatusResponse:
   """Reset a file to its raw (uncompensated) events."""
   try:
     storage.clear_compensation(file_id)
+    gates_service.invalidate_file_caches(file_id)
     status = storage.get_compensation_status(file_id)
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc

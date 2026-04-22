@@ -4,6 +4,23 @@
 
 ---
 
+## 2026‑04‑22 — Phase B: Sprint 4 — Gate Overlays + Workspace Hierarchy (INT-1)
+
+**Scope:** FE-4b (gate shape overlays with labels and per-gate colors); INT-1 verification; pre-existing TypeScript error fix.
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **FE-4b** | `frontend/src/App.tsx` | **Gate overlay labels and per-gate colors.** Replaced the two separate rect/polygon overlay render blocks with a unified `visibleGates.map()` inside an IIFE. Each gate now gets a color from an 8-color cycling palette (green → blue → amber → pink → violet → cyan → orange → lime). Each shape is accompanied by a `<text>` label showing `name · count (pct_of_parent%)` anchored above the top-left corner for rects, and at the centroid for polygons. Labels have a semi-transparent dark background pill for legibility on both dark and white plot backgrounds. |
+| **INT-1** | `backend/services/workspace_service.py` | **Verified — no changes needed.** `build_workspace_save` calls `get_gate_defs(fid)` which returns gates in `topological_order` (parent before child); `load_workspace` uses `sorted_gates()` (Kahn topological sort) and remaps `parent_gate_id` via `id_map`. Hierarchy round-trip is correct as implemented. |
+| **fix** | `frontend/src/test/setup.ts` | Fixed pre-existing TypeScript error: `HTMLCanvasElement.prototype.getContext` mock used a narrowly-typed overload that caused `TS2322`. Cast assignment to `(HTMLCanvasElement.prototype as any).getContext` — correct for a test shim. |
+
+**TypeScript check:** `tsc --noEmit` → **0 errors** (was 1 pre-existing error in test/setup.ts).  
+**Backend tests:** 23 passed, 0 failed, 2 pre-existing `RuntimeWarning`.
+
+**Next:** Phase C — frontend performance (ScatterCanvas batch draw) + vitest OOM fix + false-green test fix.
+
+---
+
 ## 2026‑04‑22 — Phase A: Pre-Sprint-4 Bug Fixes (code review → implementation)
 
 **Source:** Full code review across all backend services, routers, frontend source, and docs (2026-04-22).  

@@ -2375,74 +2375,88 @@ export const App: React.FC = () => {
                   0 events in this gate population
                 </text>
               )}
-              {transformedRange &&
-                visibleGates
-                  .filter(
-                    (g) =>
-                      g.type === "rectangle" &&
-                      g.x_min != null &&
-                      g.y_min != null &&
-                      g.x_max != null &&
-                      g.y_max != null,
-                  )
-                  .map((g) => {
-                    const { xMin, xMax, yMin, yMax } = transformedRange;
-                    const nx0 = Math.max(
-                      0,
-                      Math.min(1, (g.x_min! - xMin) / (xMax - xMin || 1)),
-                    );
-                    const nx1 = Math.max(
-                      0,
-                      Math.min(1, (g.x_max! - xMin) / (xMax - xMin || 1)),
-                    );
-                    const ny0 = Math.max(
-                      0,
-                      Math.min(1, (g.y_min! - yMin) / (yMax - yMin || 1)),
-                    );
-                    const ny1 = Math.max(
-                      0,
-                      Math.min(1, (g.y_max! - yMin) / (yMax - yMin || 1)),
-                    );
-                    const left = ml + plotAreaW * Math.min(nx0, nx1);
-                    const top = mt + plotAreaH * Math.min(1 - ny0, 1 - ny1);
-                    const rectWidth = plotAreaW * Math.abs(nx1 - nx0);
-                    const rectHeight = plotAreaH * Math.abs(ny1 - ny0);
+              {/* ── Gate overlays (Sprint 4 / FE-4b): rect + polygon shapes with per-gate
+                   colors and labels (name · count · % of parent). visibleGates is
+                   already filtered to children of activeGateId on the current axes. ── */}
+              {transformedRange && (() => {
+                // Distinct color palette — cycles if > 8 gates visible at once.
+                const GATE_COLORS = [
+                  "#22c55e", // green
+                  "#3b82f6", // blue
+                  "#f59e0b", // amber
+                  "#ec4899", // pink
+                  "#8b5cf6", // violet
+                  "#06b6d4", // cyan
+                  "#f97316", // orange
+                  "#a3e635", // lime
+                ];
+                const { xMin, xMax, yMin, yMax } = transformedRange;
+                const spanX = xMax - xMin || 1;
+                const spanY = yMax - yMin || 1;
+                // Normalise a data-space value → [0,1] clamped
+                const nx = (v: number) => Math.max(0, Math.min(1, (v - xMin) / spanX));
+                const ny = (v: number) => Math.max(0, Math.min(1, (v - yMin) / spanY));
+                // Data → SVG pixel
+                const toSvgX = (v: number) => ml + plotAreaW * nx(v);
+                const toSvgY = (v: number) => mt + plotAreaH * (1 - ny(v));
+
+                return visibleGates.map((g, idx) => {
+                  const color = GATE_COLORS[idx % GATE_COLORS.length]!;
+                  const fillAlpha = color + "18"; // ~9% fill opacity
+                  const pct = g.pct_of_parent ?? g.pct_of_total ?? 0;
+                  const label = `${g.name}  ${g.count.toLocaleString()} (${pct.toFixed(1)}%)`;
+
+                  if (g.type === "rectangle" &&
+                      g.x_min != null && g.y_min != null &&
+                      g.x_max != null && g.y_max != null) {
+                    const left   = ml + plotAreaW * Math.min(nx(g.x_min), nx(g.x_max));
+                    const top    = mt + plotAreaH * Math.min(1 - ny(g.y_min), 1 - ny(g.y_max));
+                    const rW     = plotAreaW * Math.abs(nx(g.x_max) - nx(g.x_min));
+                    const rH     = plotAreaH * Math.abs(ny(g.y_max) - ny(g.y_min));
+                    // Label: sit just above the top-left corner, clamped inside plot area
+                    const labelX = Math.max(ml + 2, Math.min(ml + plotAreaW - 4, left + 3));
+                    const labelY = Math.max(mt + 10, top - 4);
                     return (
-                      <rect
-                        key={g.id}
-                        x={left}
-                        y={top}
-                        width={rectWidth}
-                        height={rectHeight}
-                        fill="transparent"
-                        stroke="#22c55e"
-                        strokeWidth={1.2}
-                        strokeDasharray="4 2"
-                      />
+                      <g key={g.id}>
+                        <rect x={left} y={top} width={rW} height={rH}
+                          fill={fillAlpha} stroke={color} strokeWidth={1.4} strokeDasharray="5 2" />
+                        {/* label background pill */}
+                        <rect x={labelX - 2} y={labelY - 9} width={label.length * 5.6 + 6} height={12}
+                          rx={3} fill="rgba(15,23,42,0.72)" />
+                        <text x={labelX} y={labelY} fill={color} fontSize={9.5} fontWeight={600}
+                          dominantBaseline="auto" style={{ userSelect: "none" }}>
+                          {label}
+                        </text>
+                      </g>
                     );
-                  })}
-              {transformedRange &&
-                visibleGates
-                  .filter((g) => g.type === "polygon" && g.vertices && g.vertices.length >= 3)
-                  .map((g) => {
-                    const { xMin, xMax, yMin, yMax } = transformedRange;
-                    const pts = g.vertices!.map(([xRaw, yRaw]) => {
-                      const nx = (xRaw - xMin) / (xMax - xMin || 1);
-                      const ny = (yRaw - yMin) / (yMax - yMin || 1);
-                      const px = ml + plotAreaW * Math.max(0, Math.min(1, nx));
-                      const py = mt + plotAreaH * (1 - Math.max(0, Math.min(1, ny)));
-                      return `${px},${py}`;
-                    });
+                  }
+
+                  if (g.type === "polygon" && g.vertices && g.vertices.length >= 3) {
+                    const svgPts = g.vertices.map(([xRaw, yRaw]) =>
+                      `${toSvgX(xRaw)},${toSvgY(yRaw)}`
+                    );
+                    // Centroid for label anchor
+                    const cx = g.vertices.reduce((s, [x]) => s + x, 0) / g.vertices.length;
+                    const cy = g.vertices.reduce((s, [, y]) => s + y, 0) / g.vertices.length;
+                    const lx = Math.max(ml + 2, Math.min(ml + plotAreaW - 4, toSvgX(cx) - label.length * 2.8));
+                    const ly = Math.max(mt + 10, toSvgY(cy));
                     return (
-                      <polygon
-                        key={g.id}
-                        points={pts.join(" ")}
-                        fill="rgba(34,197,94,0.08)"
-                        stroke="#22c55e"
-                        strokeWidth={1.2}
-                      />
+                      <g key={g.id}>
+                        <polygon points={svgPts.join(" ")}
+                          fill={fillAlpha} stroke={color} strokeWidth={1.4} />
+                        <rect x={lx - 2} y={ly - 9} width={label.length * 5.6 + 6} height={12}
+                          rx={3} fill="rgba(15,23,42,0.72)" />
+                        <text x={lx} y={ly} fill={color} fontSize={9.5} fontWeight={600}
+                          dominantBaseline="auto" style={{ userSelect: "none" }}>
+                          {label}
+                        </text>
+                      </g>
                     );
-                  })}
+                  }
+
+                  return null;
+                });
+              })()}
               {drawingPolygon && drawingPolygon.points.length > 1 && (
                 <polyline
                   points={drawingPolygon.points

@@ -44,7 +44,8 @@ class MinimalCanvasRenderingContext2D {
   fillStyle = "";
   getImageData() { return { data: new Uint8ClampedArray(4), width: 1, height: 1 }; }
 }
-HTMLCanvasElement.prototype.getContext = function(type: string) {
+// Cast required: the overloaded signature of getContext is too narrow for a generic mock.
+(HTMLCanvasElement.prototype as any).getContext = function(type: string) {
   if (type === "2d") return new MinimalCanvasRenderingContext2D() as unknown as CanvasRenderingContext2D;
   return null;
 };

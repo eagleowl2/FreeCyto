@@ -1,6 +1,24 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑04‑22 (Phase D → E)
+> Last updated: 2026‑04‑22 (Phase D → F)
+
+---
+
+## 2026‑04‑22 — Phase F: Workspace Persistence
+
+**Scope:** Wire session auto-save; restore per-file axis/transform selections for all files on load; sync compensation state after workspace load.
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **F-1** | `backend/routers/session.py` | **`POST /api/session/save` endpoint.** Accepts any JSON body and writes it to `~/.freecyto/session.json` via `session_service.save_session` (daemon thread, non-blocking). Before this change, `save_session()` was defined but never called — the session file was never written, so `GET /api/session/restore` always returned `{"available": false}`. |
+| **F-2** | `frontend/src/App.tsx` | **Session auto-save wired.** (a) Save Workspace button now calls `POST /api/session/save` with the merged workspace JSON (including `default_axes`) as a fire-and-forget before the Electron dialog. (b) `loadWorkspaceFromParsedBody` calls `POST /api/session/save` after a successful load, keeping the session file current after restores and explicit loads. |
+| **F-3** | `frontend/src/App.tsx` | **Restore `perFileAxesRef` for all files on workspace load.** Previously only the first file's `default_axes` entry was applied to the UI; other files always fell back to defaults when the user switched to them. Now all `default_axes` entries are loaded into `perFileAxesRef` so that switching to any file after a workspace load restores the saved channel/transform selection. |
+| **F-4** | `frontend/src/App.tsx` | **Sync compensation badge after workspace load.** `loadWorkspaceFromParsedBody` now calls `GET /api/compensation/status/{first_file_id}` and sets `isCompensated`, `compCond`, `compStatus` accordingly. If the workspace had compensation applied, the "Comp" badge lights up immediately without the user having to click Apply again. |
+| **F-5** | `frontend/src/App.tsx` | **Populate spillover textarea after workspace load.** If the first loaded file's metadata contains a spillover matrix, `compText` is auto-populated so the user can inspect or re-apply it (consistent with the E-3 behaviour on fresh file loads). |
+
+**Results:** `tsc --noEmit` 0 errors · 25 backend tests passed (test_backend_workflow + test_workspace_roundtrip).
+
+**Next:** Phase G — Statistics panel (per-gate stats table, CSV export, MFI).
 
 ---
 

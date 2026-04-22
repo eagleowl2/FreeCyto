@@ -705,6 +705,47 @@ export const App: React.FC = () => {
       setFcsPath(loaded[0]?.path ?? "");
       setFcsStatus("loaded");
       setFcsError(null);
+
+      // F-3: populate perFileAxesRef for ALL files from default_axes (not just the first).
+      // This means switching files after load restores saved channel/transform selections.
+      const allAxes = wsShape.default_axes ?? {};
+      for (const lf of loaded) {
+        const saved = allAxes[lf.id];
+        if (!saved) continue;
+        perFileAxesRef.current.set(lf.id, {
+          x: typeof saved.x_channel === "string" ? saved.x_channel : (lf.channels[0] ?? ""),
+          y: typeof saved.y_channel === "string" ? saved.y_channel : (lf.channels[1] ?? lf.channels[0] ?? ""),
+          tx: coerceAxisTransform(saved.transform_x),
+          ty: coerceAxisTransform(saved.transform_y),
+        });
+      }
+
+      // F-4: sync compensation badge + spillover textarea for the first file
+      const firstLoadedId = loaded[0]?.id;
+      if (firstLoadedId) {
+        try {
+          type CompStatusResp = { is_compensated: boolean; cond?: number | null };
+          const cs = await getJson<CompStatusResp>(
+            `${API_BASE}/api/compensation/status/${encodeURIComponent(firstLoadedId)}`,
+          );
+          setIsCompensated(cs.is_compensated);
+          setCompCond(cs.is_compensated ? (cs.cond ?? null) : null);
+          setCompStatus(cs.is_compensated ? "success" : "idle");
+        } catch {
+          setIsCompensated(false);
+          setCompCond(null);
+          setCompStatus("idle");
+        }
+        setCompError(null);
+        // F-5: populate spillover textarea from first file's metadata
+        const firstSpillover = meta[0]?.spillover;
+        if (firstSpillover && firstSpillover.length > 0) {
+          setCompText(firstSpillover.map((row) => row.join(",")).join("\n"));
+        } else {
+          setCompText("");
+        }
+      }
+
       if (loaded[0]?.id) {
         await fetchGateTree(loaded[0].id);
         const pg = ++plotRequestGenerationRef.current;
@@ -713,6 +754,17 @@ export const App: React.FC = () => {
         } else {
           await fetchEventsAndPlot(loaded[0].id, xName, yName, nextTx, nextTy, pg);
         }
+      }
+      // F-2: auto-save the loaded workspace (with axes) to the session file so
+      // session restore will have the full state including default_axes.
+      try {
+        await fetch(`${API_BASE}/api/session/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } catch {
+        /* non-fatal: session save failure should not break workspace load */
       }
     },
     [fetchGateTree, fetchEventsAndPlot, fetchDensityAndPlot, plotMode],
@@ -1014,8 +1066,15 @@ export const App: React.FC = () => {
                     }
                   }
                   const wsOut = { ...ws, default_axes: mergedAxes };
+                  const wsStr = JSON.stringify(wsOut, null, 2);
+                  // F-2: persist to session file (non-blocking, ignore errors)
+                  fetch(`${API_BASE}/api/session/save`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: wsStr,
+                  }).catch(() => { /* session save is best-effort */ });
                   const result =
-                    (await window.opencyto?.saveWorkspaceFile?.(JSON.stringify(wsOut, null, 2))) ?? { canceled: true };
+                    (await window.opencyto?.saveWorkspaceFile?.(wsStr)) ?? { canceled: true };
                   if (!result.canceled) setFcsError(null);
                 } catch (err) {
                   setFcsError(err instanceof Error ? err.message : String(err));

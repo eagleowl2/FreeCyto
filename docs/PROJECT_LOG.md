@@ -1,6 +1,29 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑04‑11
+> Last updated: 2026‑04‑22
+
+---
+
+## 2026‑04‑22 — Phase A: Pre-Sprint-4 Bug Fixes (code review → implementation)
+
+**Source:** Full code review across all backend services, routers, frontend source, and docs (2026-04-22).  
+**Scope:** 5 correctness fixes identified as blockers before Sprint 4 begins. All backend tests: **23 passed, 0 failed** (pytest, Pydantic deprecation warnings eliminated).
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **A-1** | `backend/services/gates.py` | **`_compute_stats`: cold-cache parent_count fix.** If `parent._cached_count is None` when computing a child gate's `pct_of_parent`, the code was silently falling back to `pct_of_parent = 100.0`. Fix: call `_compute_stats(parent)` before reading `_cached_count` when the parent cache is cold. Affects any call path where `_compute_stats` is invoked out of topological order (e.g. `create_gate` with a parent gate whose cache was invalidated). |
+| **A-2** | `backend/routers/files.py` | **Logicle params added to file-level `/events` and `/density` endpoints.** `GET /api/files/{file_id}/events` and `GET /api/files/{file_id}/density` previously accepted only `arcsinh_cofactor`; if `transform_*=logicle` was requested, `logicle_t/w/m/a` were silently defaulted. Both endpoints now accept `logicle_t`, `logicle_w`, `logicle_m`, `logicle_a` query params, matching the existing gate endpoints. |
+| **A-3** | `frontend/src/App.tsx` | **Gate tree refresh after compensation apply.** After `POST /api/compensation/apply`, the scatter plot was refreshed but `fetchGateTree` was not called, leaving gate count/percentage displays stale. Added `await fetchGateTree(file.id)` before the scatter refetch in the compensation apply handler. (The delete-path `activeGateId` reset — S3-9 — was already implemented in the previous commit at line 2503.) |
+| **A-4** | `frontend/src/components/GateTreePanel.tsx`, `frontend/src/App.tsx` | **`onCreateChild` signature fix (TypeScript correctness).** `GateTreePanelProps.onCreateChild` was typed `() => void` but `GateTreeNode` internally called it as `onCreateChild(parentId: string)`, and the "All Events" root button called it with no argument. Fixed: prop is now `(parentId: string \| null) => void`; root button passes `null`; child node's forwarding passes `parentId`; `App.tsx` call-site destructures `parentId` and sets `activeGateId` before opening draw mode. |
+| **A-5** | `backend/models/gate_models.py` | **Pydantic v2 migration: `class Config` → `model_config`.** `GateResponse` used the deprecated Pydantic v1 `class Config: pass` block, generating 3 pytest deprecation warnings per run. Replaced with `model_config = ConfigDict()` (Pydantic v2). Import of `ConfigDict` added. |
+
+**Test result after Phase A:**
+```
+23 passed, 2 warnings in 7.06s
+```
+*(2 remaining warnings are pre-existing `RuntimeWarning: divide by zero` in winding-number polygon test — harmless, masked by `np.where`.)*
+
+**Next:** Phase B — Sprint 4 (gate overlays + workspace hierarchy).
 
 This log tracks the implementation stages of the FreeCyto (OpenCyto Studio) MVP.
 

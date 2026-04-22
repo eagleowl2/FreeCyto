@@ -19,7 +19,8 @@ interface GateTreePanelProps {
   activeGateId: string | null;
   onSelectGate: (id: string | null) => void;
   onDeleteGate: (id: string) => Promise<void>;
-  onCreateChild: () => void;
+  /** Called with the parent gate id, or null when creating a root-level gate (A-4). */
+  onCreateChild: (parentId: string | null) => void;
   loading?: boolean;
   error?: string | null;
 }
@@ -184,7 +185,7 @@ export const GateTreePanel: React.FC<GateTreePanelProps> = ({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onCreateChild();
+          onCreateChild(null);
         }}
         style={iconButtonStyle("#4ade80")}
       >
@@ -226,7 +227,7 @@ export const GateTreePanel: React.FC<GateTreePanelProps> = ({
         }}
         onCreateChild={(parentId) => {
           onSelectGate(parentId);
-          onCreateChild();
+          onCreateChild(parentId);
         }}
       />
     ))}

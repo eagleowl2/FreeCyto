@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -17,15 +18,63 @@ import numpy as np
 
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+MAX_FILES_PER_LOAD = 64
+MAX_SINGLE_FILE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_TOTAL_LOAD_BYTES = 8 * 1024 * 1024 * 1024
+MAX_PATH_CHARS = 4096
+ALLOWED_EXTENSIONS = {".fcs"}
+
+
+def _validated_load_paths(paths: List[str]) -> List[str]:
+  if not paths:
+    raise HTTPException(status_code=400, detail="No file paths provided")
+  if len(paths) > MAX_FILES_PER_LOAD:
+    raise HTTPException(status_code=413, detail=f"Too many files requested (max {MAX_FILES_PER_LOAD})")
+
+  validated: List[str] = []
+  total_bytes = 0
+  for raw in paths:
+    path_str = str(raw or "").strip()
+    if not path_str:
+      raise HTTPException(status_code=400, detail="Empty file path in request")
+    if len(path_str) > MAX_PATH_CHARS:
+      raise HTTPException(status_code=400, detail="File path is too long")
+
+    resolved = Path(path_str).expanduser()
+    try:
+      resolved = resolved.resolve(strict=True)
+    except FileNotFoundError as exc:
+      raise HTTPException(status_code=404, detail=f"File not found: {path_str}") from exc
+    except OSError as exc:
+      raise HTTPException(status_code=400, detail=f"Invalid file path: {path_str}") from exc
+
+    if not resolved.is_file():
+      raise HTTPException(status_code=400, detail=f"Path is not a file: {resolved}")
+    if resolved.suffix.lower() not in ALLOWED_EXTENSIONS:
+      raise HTTPException(status_code=400, detail=f"Unsupported file type: {resolved.suffix or '(none)'}")
+
+    size_bytes = resolved.stat().st_size
+    if size_bytes <= 0:
+      raise HTTPException(status_code=400, detail=f"File is empty: {resolved.name}")
+    if size_bytes > MAX_SINGLE_FILE_BYTES:
+      raise HTTPException(status_code=413, detail=f"File too large: {resolved.name}")
+    total_bytes += size_bytes
+    if total_bytes > MAX_TOTAL_LOAD_BYTES:
+      raise HTTPException(status_code=413, detail="Total upload size exceeds limit")
+
+    validated.append(str(resolved))
+  return validated
 
 
 @router.post("/load", response_model=FileLoadResponse)
 async def load_files(body: FileLoadRequest) -> FileLoadResponse:
   """Load one or more FCS files and return their metadata."""
   try:
-    files: List[FileMetadata] = fcs_parser.load_and_register_files(body.paths)
+    files: List[FileMetadata] = fcs_parser.load_and_register_files(_validated_load_paths(body.paths))
   except FileNotFoundError as exc:
     raise HTTPException(status_code=404, detail=f"File not found: {exc}") from exc
+  except HTTPException:
+    raise
   except Exception as exc:  # surface parse/validation errors to the client for now
     raise HTTPException(status_code=500, detail=f"load_files error: {exc!r}") from exc
 

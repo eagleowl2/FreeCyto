@@ -7,12 +7,15 @@ when the backend process exits or when the file is evicted from the file cache."
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass, field
 import numpy as np
 
 from models.gate_models import GateCreateRequest, GateResponse
 from services import storage, transforms as transform_service
+
+SUSPENDED_FILE_TTL_SECONDS = 60 * 60
 
 
 class GateNameExistsError(ValueError):
@@ -106,12 +109,14 @@ class GateStore:
     self.gate_children: dict[str, list[str]] = {}  # gate_id -> child gate IDs (ordered)
     # file_ids evicted by LRU but not explicitly deleted — gate defs kept until reload
     self.suspended_files: set[str] = set()
+    self.suspended_at: dict[str, float] = {}
 
   def reset(self) -> None:
     self.gates_by_id.clear()
     self.root_children.clear()
     self.gate_children.clear()
     self.suspended_files.clear()
+    self.suspended_at.clear()
 
 
 _store = GateStore()
@@ -130,18 +135,38 @@ def _on_file_evicted(file_id: str, hard_delete: bool = False) -> None:
   """
   if hard_delete:
     _store.suspended_files.discard(file_id)
+    _store.suspended_at.pop(file_id, None)
     for gid in list(_store.root_children.pop(file_id, [])):
       _evict_gate_subtree(gid)
     _store.root_children.pop(file_id, None)
   else:
+    # Soft eviction (LRU): keep definitions but mark file unavailable and drop cached masks/stats.
+    # When the same file id is loaded again, resume_gates_for_file() re-enables and re-evaluates.
     _store.suspended_files.add(file_id)
+    _store.suspended_at[file_id] = time.time()
+    invalidate_file_caches(file_id)
 
 
 def resume_gates_for_file(file_id: str) -> None:
   """After the same ``file_id`` is registered again, drop suspension and refresh masks."""
   if file_id in _store.suspended_files:
     _store.suspended_files.discard(file_id)
+    _store.suspended_at.pop(file_id, None)
     invalidate_file_caches(file_id)
+
+
+def _cleanup_expired_suspended_files(now: float | None = None) -> None:
+  ts = time.time() if now is None else now
+  expired = [
+    file_id for file_id in list(_store.suspended_files)
+    if ts - _store.suspended_at.get(file_id, ts) >= SUSPENDED_FILE_TTL_SECONDS
+  ]
+  for file_id in expired:
+    _store.suspended_files.discard(file_id)
+    _store.suspended_at.pop(file_id, None)
+    for gid in list(_store.root_children.pop(file_id, [])):
+      _evict_gate_subtree(gid)
+    _store.root_children.pop(file_id, None)
 
 
 def _evict_gate_subtree(gate_id: str) -> None:
@@ -322,6 +347,7 @@ def _all_gate_ids_for_file(file_id: str) -> list[str]:
 
 def create_gate(body: GateCreateRequest) -> GateResponse:
   """Create a gate, evaluate it, store and return. Params validated by Pydantic (422 if invalid)."""
+  _cleanup_expired_suspended_files()
   storage.get_file_metadata(body.file_id)
   existing_names = set()
   for gid in _all_gate_ids_for_file(body.file_id):
@@ -484,6 +510,7 @@ def invalidate_file_caches(file_id: str) -> None:
 
 def get_gate_defs(file_id: str) -> list[GateRecord]:
   """Return gate records in tree order without evaluating masks or stats (e.g. workspace save)."""
+  _cleanup_expired_suspended_files()
   storage.get_file_metadata(file_id)
   ordered = topological_order(file_id)
   out: list[GateRecord] = []
@@ -496,6 +523,7 @@ def get_gate_defs(file_id: str) -> list[GateRecord]:
 
 def list_gates(file_id: str) -> list[GateResponse]:
   """List all gates for a file with current counts. Uses cache when valid."""
+  _cleanup_expired_suspended_files()
   # Guard: storage.get_file_metadata raises KeyError (→ 404 at router) if the file is not loaded.
   storage.get_file_metadata(file_id)
   ordered = topological_order(file_id)
@@ -535,6 +563,7 @@ def get_gate_tree(file_id: str) -> list[GateResponse]:
   reuse cached masks/stats and are O(n) cheap reads. Cache is invalidated
   by create_gate, delete_gate, and invalidate_file_caches.
   """
+  _cleanup_expired_suspended_files()
   storage.get_file_metadata(file_id)
   root_ids = _store.root_children.get(file_id, [])
 
@@ -573,6 +602,7 @@ def get_gate_events(
   logicle_a: float | None = None,
 ) -> tuple[str, list[str], list[list[float]]]:
   """Return downsampled events inside the gate population. Returns (file_id, channel_names, events rows)."""
+  _cleanup_expired_suspended_files()
   record = _store.gates_by_id.get(gate_id)
   if record is None:
     raise KeyError(f"Gate {gate_id!r} not found")
@@ -632,6 +662,7 @@ def get_gate_density(
   The histogram is computed in transformed space so that overlays and axes
   align with the gate's stored transform settings.
   """
+  _cleanup_expired_suspended_files()
   record = _store.gates_by_id.get(gate_id)
   if record is None:
     raise KeyError(f"Gate {gate_id!r} not found")
@@ -735,6 +766,7 @@ def get_gate_density(
 def delete_all_gates_for_file(file_id: str) -> None:
   """Clear all gates for a file (e.g. on compensation reset or re-load)."""
   _store.suspended_files.discard(file_id)
+  _store.suspended_at.pop(file_id, None)
   for gid in list(_store.root_children.get(file_id, [])):
     _evict_gate_subtree(gid)
   _store.root_children.pop(file_id, None)

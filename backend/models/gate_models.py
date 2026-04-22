@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Annotated, List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RectangleGateParams(BaseModel):
@@ -90,6 +90,5 @@ class GateResponse(BaseModel):
   parent_count: int = 0
   children: List["GateResponse"] = Field(default_factory=list)
 
-  class Config:
-    # pct_total kept as alias for FE transition; same value as pct_of_total
-    pass
+  # pct_total kept as field alias for FE transition; same value as pct_of_total (A-5).
+  model_config = ConfigDict()

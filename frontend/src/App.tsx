@@ -26,6 +26,9 @@ type LoadedFile = {
 type ScatterPoint = { x: number; y: number };
 
 const API_BASE = "http://127.0.0.1:8765";
+const DEFAULT_X_TRANSFORM: "linear" | "log" | "arcsinh" | "logicle" = "log";
+const DEFAULT_Y_TRANSFORM: "linear" | "log" | "arcsinh" | "logicle" = "linear";
+const VALID_DENSITY_COLORMAPS: readonly DensityColormap[] = ["jet", "viridis", "inferno"];
 
 type ChannelInfo = {
   name: string;
@@ -80,7 +83,7 @@ export const App: React.FC = () => {
   const [channels, setChannels] = React.useState<ChannelInfo[]>([]);
   const [xChannel, setXChannel] = React.useState("");
   const [yChannel, setYChannel] = React.useState("");
-  const [plotMode, setPlotMode] = React.useState<"points" | "density">("points");
+  const [plotMode, setPlotMode] = React.useState<"points" | "density">("density");
   const [densityColormap, setDensityColormap] = React.useState<DensityColormap>("jet");
   const [densityDisplayScale, setDensityDisplayScale] = React.useState<DensityScale>("log");
   const [plotBgMode, setPlotBgMode] = React.useState<"dark" | "white">(() => {
@@ -90,8 +93,12 @@ export const App: React.FC = () => {
       return "dark";
     }
   });
-  const [transformX, setTransformX] = React.useState<"linear" | "log" | "arcsinh" | "logicle">("linear");
-  const [transformY, setTransformY] = React.useState<"linear" | "log" | "arcsinh" | "logicle">("linear");
+  const [transformX, setTransformX] = React.useState<"linear" | "log" | "arcsinh" | "logicle">(
+    DEFAULT_X_TRANSFORM,
+  );
+  const [transformY, setTransformY] = React.useState<"linear" | "log" | "arcsinh" | "logicle">(
+    DEFAULT_Y_TRANSFORM,
+  );
   const [points, setPoints] = React.useState<ScatterPoint[]>([]);
   /** Min/max in current transform space (plot axes). Gate coordinates are in this space. */
   const [transformedRange, setTransformedRange] = React.useState<{
@@ -150,6 +157,22 @@ export const App: React.FC = () => {
   const sessionRestoreAttemptedRef = React.useRef(false);
   const debugLog = React.useCallback((msg: string) => {
     void window.opencyto?.appendDebugLog?.(msg);
+  }, []);
+  const runSafeUiAction = React.useCallback(
+    (label: string, action: () => Promise<void>) => {
+      void action().catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        setFcsError(message);
+        setDebugUiStatus(`${label} failed: ${message}`);
+        debugLog(`[ui.action.error] ${label}: ${message}`);
+      });
+    },
+    [debugLog],
+  );
+  const setDensityColormapSafe = React.useCallback((next: unknown) => {
+    if (typeof next === "string" && (VALID_DENSITY_COLORMAPS as readonly string[]).includes(next)) {
+      setDensityColormap(next as DensityColormap);
+    }
   }, []);
 
   const checkHealth = React.useCallback(async () => {
@@ -219,8 +242,11 @@ export const App: React.FC = () => {
     const xMax = Math.max(...xs);
     const yMin = Math.min(...ys);
     const yMax = Math.max(...ys);
-    const norm = (v: number, min: number, max: number) =>
-      max === min ? 0.5 : (v - min) / (max - min);
+    const norm = (v: number, min: number, max: number) => {
+      if (min > max) throw new Error(`Invalid range: min (${min}) > max (${max})`);
+      if (max === min) return 0.5;
+      return (v - min) / (max - min);
+    };
     const points = rawPoints.map((p) => ({
       x: norm(p.x, xMin, xMax),
       y: norm(p.y, yMin, yMax),
@@ -405,7 +431,10 @@ export const App: React.FC = () => {
       const names = firstChannels.map((c) => c.name);
       const xPref = ["FSC-A", "FSC", "FSC-H"];
       const yPref = ["SSC-A", "SSC", "SSC-H"];
-      const pick = (prefs: string[]) => prefs.find((p) => names.includes(p)) ?? null;
+      const pick = (prefs: string[]) => {
+        if (!Array.isArray(prefs) || !Array.isArray(names) || prefs.length === 0) return null;
+        return prefs.find((p) => names.includes(p)) || null;
+      };
       let xName = pick(xPref) ?? names[0] ?? "";
       let yName = pick(yPref) ?? names[1] ?? names[0] ?? "";
 
@@ -428,9 +457,14 @@ export const App: React.FC = () => {
       setChannels(firstChannels);
       setXChannel(xName);
       setYChannel(yName);
-      setTransformX("linear");
-      setTransformY("linear");
-      perFileAxesRef.current.set(loaded.id, { x: xName, y: yName, tx: "linear", ty: "linear" });
+      setTransformX(DEFAULT_X_TRANSFORM);
+      setTransformY(DEFAULT_Y_TRANSFORM);
+      perFileAxesRef.current.set(loaded.id, {
+        x: xName,
+        y: yName,
+        tx: DEFAULT_X_TRANSFORM,
+        ty: DEFAULT_Y_TRANSFORM,
+      });
       setFcsStatus("loaded");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -593,8 +627,17 @@ export const App: React.FC = () => {
         default_axes?: Record<string, Record<string, unknown>>;
         gates?: Array<{ file_id?: string; transform_x?: unknown; transform_y?: unknown }>;
       };
-      const coerceAxisTransform = (v: unknown): "linear" | "log" | "arcsinh" | "logicle" =>
-        v === "log" || v === "arcsinh" || v === "logicle" || v === "linear" ? v : "linear";
+      const VALID_TRANSFORMS = ["linear", "log", "arcsinh", "logicle"] as const;
+      type AxisTransformName = (typeof VALID_TRANSFORMS)[number];
+      const coerceAxisTransform = (v: unknown): AxisTransformName => {
+        if (
+          typeof v === "string" &&
+          (VALID_TRANSFORMS as readonly string[]).includes(v)
+        ) {
+          return v as AxisTransformName;
+        }
+        return "linear";
+      };
 
       const loadResult = await postJson<LoadResult>(`${API_BASE}/api/workspace/load`, body);
       const meta = loadResult.file_metadata;
@@ -620,8 +663,8 @@ export const App: React.FC = () => {
       const wsShape = body as WorkspaceAxesShape;
       const firstId = firstMeta.id;
       const axes = wsShape.default_axes?.[firstId];
-      let nextTx: "linear" | "log" | "arcsinh" | "logicle" = "linear";
-      let nextTy: "linear" | "log" | "arcsinh" | "logicle" = "linear";
+      let nextTx: "linear" | "log" | "arcsinh" | "logicle" = DEFAULT_X_TRANSFORM;
+      let nextTy: "linear" | "log" | "arcsinh" | "logicle" = DEFAULT_Y_TRANSFORM;
       if (axes && (axes.transform_x !== undefined || axes.transform_y !== undefined)) {
         nextTx = coerceAxisTransform(axes.transform_x);
         nextTy = coerceAxisTransform(axes.transform_y);
@@ -1036,15 +1079,16 @@ export const App: React.FC = () => {
           <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
             <button
               type="button"
-              onClick={async () => {
-                const r = await window.opencyto?.clearDebugLog?.();
-                if (r?.ok) {
-                  setDebugUiStatus(`Cleared log at ${r.path ?? debugLogPath}`);
-                  debugLog("[ui.debug] cleared log");
-                } else {
-                  setDebugUiStatus(`Failed to clear log: ${r?.error ?? "unknown"}`);
-                }
-              }}
+              onClick={() =>
+                runSafeUiAction("clear-debug-log", async () => {
+                  const r = await window.opencyto?.clearDebugLog?.();
+                  if (r?.ok) {
+                    setDebugUiStatus(`Cleared log at ${r.path ?? debugLogPath}`);
+                    debugLog("[ui.debug] cleared log");
+                  } else {
+                    setDebugUiStatus(`Failed to clear log: ${r?.error ?? "unknown"}`);
+                  }
+                })}
               style={{
                 padding: "0.25rem 0.55rem",
                 borderRadius: "0.35rem",
@@ -1256,11 +1300,11 @@ export const App: React.FC = () => {
                         setXChannel(saved?.x && names.includes(saved.x) ? saved.x : names[0] ?? "");
                         setYChannel(saved?.y && names.includes(saved.y) ? saved.y : names[1] ?? names[0] ?? "");
                         if (saved) {
-                          setTransformX(saved.tx ?? "linear");
-                          setTransformY(saved.ty ?? "linear");
+                          setTransformX(saved.tx ?? DEFAULT_X_TRANSFORM);
+                          setTransformY(saved.ty ?? DEFAULT_Y_TRANSFORM);
                         } else {
-                          setTransformX("linear");
-                          setTransformY("linear");
+                          setTransformX(DEFAULT_X_TRANSFORM);
+                          setTransformY(DEFAULT_Y_TRANSFORM);
                         }
                         setLoadedFiles((prev) =>
                           prev.map((f) => (f.id === lf.id ? updated : f)),
@@ -1282,11 +1326,11 @@ export const App: React.FC = () => {
                         setXChannel(saved?.x ?? lf.channels[0] ?? "");
                         setYChannel(saved?.y ?? lf.channels[1] ?? lf.channels[0] ?? "");
                         if (saved) {
-                          setTransformX(saved.tx ?? "linear");
-                          setTransformY(saved.ty ?? "linear");
+                          setTransformX(saved.tx ?? DEFAULT_X_TRANSFORM);
+                          setTransformY(saved.ty ?? DEFAULT_Y_TRANSFORM);
                         } else {
-                          setTransformX("linear");
-                          setTransformY("linear");
+                          setTransformX(DEFAULT_X_TRANSFORM);
+                          setTransformY(DEFAULT_Y_TRANSFORM);
                         }
                         setFcsStatus("loaded");
                       }
@@ -1391,8 +1435,8 @@ export const App: React.FC = () => {
                   X transform
                   <select
                     value={transformX}
-                    onChange={(e) => {
-                      void (async () => {
+                    onChange={(e) =>
+                      runSafeUiAction("transform-x-change", async () => {
                         const value = e.target.value as "linear" | "log" | "arcsinh" | "logicle";
                         debugLog(`[ui.transformX.change] from=${transformX} to=${value} file=${file?.id ?? "none"}`);
                         // Clear current range immediately so AxisTicks never renders a stale linear range as log.
@@ -1406,8 +1450,7 @@ export const App: React.FC = () => {
                         await clearGatesForTransformChange();
                         setTransformX(value);
                         debugLog(`[ui.transformX.applied] value=${value}`);
-                      })();
-                    }}
+                      })}
                     style={{
                       display: "block",
                       marginTop: "0.2rem",
@@ -1430,8 +1473,8 @@ export const App: React.FC = () => {
                   Y transform
                   <select
                     value={transformY}
-                    onChange={(e) => {
-                      void (async () => {
+                    onChange={(e) =>
+                      runSafeUiAction("transform-y-change", async () => {
                         const value = e.target.value as "linear" | "log" | "arcsinh" | "logicle";
                         debugLog(`[ui.transformY.change] from=${transformY} to=${value} file=${file?.id ?? "none"}`);
                         // Clear current range immediately so AxisTicks never renders a stale linear range as log.
@@ -1445,8 +1488,7 @@ export const App: React.FC = () => {
                         await clearGatesForTransformChange();
                         setTransformY(value);
                         debugLog(`[ui.transformY.applied] value=${value}`);
-                      })();
-                    }}
+                      })}
                     style={{
                       display: "block",
                       marginTop: "0.2rem",
@@ -2047,7 +2089,7 @@ export const App: React.FC = () => {
                         <button
                           key={cm}
                           type="button"
-                          onClick={() => setDensityColormap(cm)}
+                          onClick={() => setDensityColormapSafe(cm)}
                           style={{
                             padding: "0.1rem 0.4rem",
                             borderRadius: "999px",

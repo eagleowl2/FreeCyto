@@ -32,6 +32,7 @@ async def apply_compensation(body: CompensationApplyRequest) -> CompensationAppl
   return CompensationApplyResponse(
     file_id=body.file_id,
     n_channels=len(metadata.channels),
+    cond=cond,
   )
 
 

@@ -79,6 +79,10 @@ export const App: React.FC = () => {
   const [compText, setCompText] = React.useState("");
   const [compStatus, setCompStatus] = React.useState<"idle" | "applying" | "error" | "success">("idle");
   const [compError, setCompError] = React.useState<string | null>(null);
+  /** Condition number of the most recently applied spillover matrix (null = raw / unknown). */
+  const [compCond, setCompCond] = React.useState<number | null>(null);
+  /** Whether the backend currently has compensation applied for the active file. */
+  const [isCompensated, setIsCompensated] = React.useState(false);
   const [file, setFile] = React.useState<LoadedFile | null>(null);
   const [channels, setChannels] = React.useState<ChannelInfo[]>([]);
   const [xChannel, setXChannel] = React.useState("");
@@ -466,6 +470,16 @@ export const App: React.FC = () => {
         tx: DEFAULT_X_TRANSFORM,
         ty: DEFAULT_Y_TRANSFORM,
       });
+      // E-3: auto-populate spillover textarea when the file embeds $SPILLOVER
+      if (first.spillover && first.spillover.length > 0) {
+        setCompText(first.spillover.map((row: number[]) => row.join(",")).join("\n"));
+      } else {
+        setCompText("");
+      }
+      // E-5: reset compensation badge — fresh file load always starts uncompensated
+      setCompStatus("idle");
+      setCompCond(null);
+      setIsCompensated(false);
       setFcsStatus("loaded");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1310,6 +1324,28 @@ export const App: React.FC = () => {
                         setLoadedFiles((prev) =>
                           prev.map((f) => (f.id === lf.id ? updated : f)),
                         );
+                        // E-3: auto-populate spillover textarea on file switch
+                        const sw = meta.spillover ?? lf.spillover ?? null;
+                        if (sw && sw.length > 0) {
+                          setCompText(sw.map((row: number[]) => row.join(",")).join("\n"));
+                        } else {
+                          setCompText("");
+                        }
+                        // E-5: sync compensation badge with backend state for this file
+                        try {
+                          type CompStatusResp = { is_compensated: boolean; cond?: number | null };
+                          const cs = await getJson<CompStatusResp>(
+                            `${API_BASE}/api/compensation/status/${encodeURIComponent(lf.id)}`,
+                          );
+                          setIsCompensated(cs.is_compensated);
+                          setCompCond(cs.is_compensated ? (cs.cond ?? null) : null);
+                          setCompStatus(cs.is_compensated ? "success" : "idle");
+                        } catch {
+                          setIsCompensated(false);
+                          setCompCond(null);
+                          setCompStatus("idle");
+                        }
+                        setCompError(null);
                         setFcsStatus("loaded");
                       } catch {
                         setFile(lf);
@@ -1607,7 +1643,11 @@ export const App: React.FC = () => {
                           throw new Error("Matrix must be square (same row length)");
                         }
                         const body = { file_id: file.id, spillover: rows };
-                        await postJson(`${API_BASE}/api/compensation/apply`, body);
+                        // E-2: capture condition number from apply response
+                        type CompApplyResp = { file_id: string; n_channels: number; cond?: number | null };
+                        const applyResp = await postJson<CompApplyResp>(`${API_BASE}/api/compensation/apply`, body);
+                        setCompCond(applyResp?.cond ?? null);
+                        setIsCompensated(true);
                         setCompStatus("success");
                         const pg = ++plotRequestGenerationRef.current;
                         if (plotMode === "density") {
@@ -1652,6 +1692,9 @@ export const App: React.FC = () => {
                           const t = await res.text();
                           throw new Error(t || `HTTP ${res.status}`);
                         }
+                        // E-2: clear condition number and badge on reset
+                        setCompCond(null);
+                        setIsCompensated(false);
                         setCompStatus("idle");
                         setCompError(null);
                         const pg = ++plotRequestGenerationRef.current;
@@ -1681,7 +1724,18 @@ export const App: React.FC = () => {
                   </div>
                   <div style={{ fontSize: "0.8rem" }}>
                     {compStatus === "success" && (
-                      <span style={{ color: "#4ade80" }}>Applied</span>
+                      <span style={{ color: "#4ade80" }}>
+                        Applied
+                        {compCond != null && (
+                          // E-2: condition number — green <10 (well-conditioned), yellow 10–100, red >100
+                          <span style={{
+                            marginLeft: "0.4rem",
+                            color: compCond < 10 ? "#4ade80" : compCond < 100 ? "#fbbf24" : "#f87171",
+                          }}>
+                            {`κ=${compCond.toFixed(1)}`}
+                          </span>
+                        )}
+                      </span>
                     )}
                     {compStatus === "error" && compError && (
                       <span style={{ color: "#fca5a5" }}>{compError}</span>
@@ -2084,6 +2138,33 @@ export const App: React.FC = () => {
                   >
                     {plotBgMode === "white" ? "Plot: light" : "Plot: dark"}
                   </button>
+                  {/* E-4: compensation status badge in plot header */}
+                  {file && (
+                    <span
+                      title={
+                        isCompensated
+                          ? compCond != null
+                            ? `Compensated · κ=${compCond.toFixed(1)}`
+                            : "Compensated"
+                          : "Raw (uncompensated)"
+                      }
+                      style={{
+                        padding: "0.1rem 0.45rem",
+                        borderRadius: "999px",
+                        fontSize: "0.65rem",
+                        fontWeight: 600,
+                        letterSpacing: "0.03em",
+                        userSelect: "none",
+                        background: isCompensated
+                          ? "rgba(34,197,94,0.18)"
+                          : "rgba(148,163,184,0.12)",
+                        color: isCompensated ? "#4ade80" : "#64748b",
+                        border: `1px solid ${isCompensated ? "rgba(34,197,94,0.4)" : "rgba(148,163,184,0.3)"}`,
+                      }}
+                    >
+                      {isCompensated ? "Comp" : "Raw"}
+                    </span>
+                  )}
                   {plotMode === "density" && (
                     <>
                       {(["jet", "viridis", "inferno"] as const).map((cm) => (

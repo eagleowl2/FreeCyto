@@ -96,6 +96,10 @@ class CompensationApplyRequest(BaseModel):
 class CompensationApplyResponse(BaseModel):
   file_id: str
   n_channels: int
+  cond: Optional[float] = Field(
+    None,
+    description="Condition number of the spillover matrix. <10 = well-conditioned, >100 = poorly-conditioned.",
+  )
 
 
 class CompensationStatusResponse(BaseModel):

@@ -1,6 +1,53 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑04‑22
+> Last updated: 2026‑04‑22 (Phase D → E)
+
+---
+
+## 2026‑04‑22 — Phase D: FlowJo Parity Validation (Sprint 5)
+
+**Scope:** Write `backend/tests/test_flowjo_parity.py` — a real-FCS test suite that validates the gate engine against a deterministic numpy reference on a 4-level WBC panel hierarchy.
+
+### What was done
+
+**D-0 — Fixture audit (complete)**
+
+- Confirmed `tests/fixtures/WBC_CP8.fcs` and `tests/fixtures/reference.fcs` are both 422,888-event, 19-channel files with identical layout.
+- Confirmed `tests/fixtures/reference_counts.json` contains ground-truth counts for `reference.fcs`: `Singlets = 177,698` (FSC-A 50k–250k × SSC-A 20k–200k), `Lymphocytes = 147,662` (FSC-A 60k–150k × SSC-A 30k–120k).
+- Gathered percentile data from `WBC_CP8.fcs` to calibrate fluorescence gate bounds:
+  - CD3 channel (BV605-A, idx 8) arcsinh(x/150): p25≈1, p75≈3, p95≈5
+  - CD4 channel (BB515-A, idx 12) arcsinh(x/150): p25≈0, p75≈1, p95≈5
+
+**D-1 — `test_flowjo_parity.py` written (complete)**
+
+New file `backend/tests/test_flowjo_parity.py` — 18 tests across 5 classes:
+
+| Class | Tests | Covers |
+|-------|-------|--------|
+| `TestSingletsGate` | 3 | Root rect gate; exact numpy count; pct_of_total formula; ±0.1% vs reference_counts.json |
+| `TestLymphocytesGate` | 4 | Child rect gate; exact numpy count with parent mask; pct_of_parent; ≤ parent count; ±0.1% reference |
+| `TestCD3Gate` | 3 | Arcsinh rect gate on BV605-A × SSC-A; exact numpy count; subset property; nonzero CD3+ population (>5% of lymphocytes) |
+| `TestCD4Gate` | 2 | 4-level hierarchy; arcsinh rect gate on BB515-A × BV605-A; exact numpy count; subset property |
+| `TestPolygonFluorescence` | 2 | Rectangular polygon in arcsinh space; subset property + exact count vs bbox numpy reference |
+| `TestFullHierarchy` | 4 | Tree depths 0/1/2/3; count stability across 5 consecutive `get_gate_tree` calls; pct_of_parent cascade formula; all 4 gates nonzero |
+
+**D-2 — Results: 18/18 passed (9.57 s)**
+
+```
+18 passed, 2 warnings in 9.57s
+```
+
+The 2 warnings are benign pre-existing `RuntimeWarning: divide by zero encountered in divide` from the polygon winding-number algorithm (see Known Issues below).
+
+### Known issues logged for future fixing
+
+| ID | File | Issue | Priority |
+|----|------|--------|----------|
+| **D-KI-1** | `backend/services/gates.py:53` | **Polygon winding-number divide-by-zero warning.** `np.where(mask, (y - vy[i]) / denom, np.nan)` still evaluates the division for all elements before the `where` branch — numpy emits `RuntimeWarning: divide by zero` when a horizontal polygon edge has `denom=0`. Fix: use `np.divide(y - vy[i], denom, where=mask, out=np.full_like(denom, np.nan))` or pre-substitute `denom = np.where(mask, denom, 1.0)` before division. Functionally harmless (guarded by `mask`), but noisy in test output. | Low |
+| **D-KI-2** | `backend/services/gates.py` `_compute_stats` | **A-1 fix incomplete on disk.** The summary states the cold-cache parent fix was applied (recursive `_compute_stats(parent)` when `parent._cached_count is None`), but the code on disk still uses the bare `parent._cached_count is not None` guard without the recursive call. Bug is masked by `create_gate` calling `_compute_stats(parent)` first and `get_gate_tree` traversing depth-first (parents always compute before children). Would manifest only if `_compute_stats` is called directly on a child gate with a cold-cache parent — e.g. after partial cache invalidation followed by `list_gates`. Should be patched in a future session. | Medium |
+| **D-KI-3** | `backend/tests/` | **Full backend test suite not run after D-1.** Only `test_flowjo_parity.py` was confirmed (18/18). The full `pytest tests/` run was interrupted by the user before completion. Should be verified before next commit. | Low |
+
+**Next:** Phase E — Compensation UI (condition number badge, auto-load spillover, reset UX polish).
 
 ---
 

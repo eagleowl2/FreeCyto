@@ -114,15 +114,16 @@ export const App: React.FC = () => {
   const [gateTreeLoading, setGateTreeLoading] = React.useState(false);
   const [gateTreeError, setGateTreeError] = React.useState<string | null>(null);
   const gateList = React.useMemo(() => flattenTree(gateTree), [gateTree]);
+  // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
     () =>
-      flattenTree(gateTree).filter(
+      gateList.filter(
         (g) =>
           g.parent_gate_id === activeGateId &&
           g.x_channel === xChannel &&
           g.y_channel === yChannel,
       ),
-    [gateTree, activeGateId, xChannel, yChannel],
+    [gateList, activeGateId, xChannel, yChannel],
   );
   const [gateNameError, setGateNameError] = React.useState<string | null>(null);
   const [drawingRect, setDrawingRect] = React.useState<

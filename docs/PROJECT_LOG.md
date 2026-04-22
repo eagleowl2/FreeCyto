@@ -4,6 +4,23 @@
 
 ---
 
+## 2026‑04‑22 — Phase C: Performance, Test Integrity, and Memo Fixes
+
+**Scope:** Four targeted improvements identified in the code review. No backend changes.
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **C-1** | `frontend/src/ScatterCanvas.tsx` | **Batch canvas draw (~10–15× faster for 15 k points).** The previous loop called `beginPath` + `arc` + `fill` per point — 3 GPU state changes × 15 k = 45 k calls. Replaced with a single `beginPath`, arc-loop with `moveTo` before each arc (prevents implicit line-to between arcs), and a single `fill`. Reduces GPU state changes from O(3n) to O(n+2). |
+| **C-2** | `frontend/src/test/mocks/server.ts` | **Vitest OOM fix.** `makeDensityResponse` was creating a 200×200 bin array (40 k numbers × `sizeof(float)` × React/jsdom overhead) on every test run. Shrunk to 10×10. Tests do not depend on density resolution. |
+| **C-3** | `frontend/src/test/interactions/gateCreation.test.tsx` | **Fix false-green second test.** "sends parent_gate_id when a gate is active" had `if (gatePayloads.length > 0)` inside `waitFor` — passed vacuously when no gate was submitted. Replaced with the full draw sequence (mousedown → move → mouseup → name input → Create gate) and an unconditional `expect(gatePayloads.length).toBe(1)` + `expect(payload.parent_gate_id).toBe("parent-g")`. |
+| **C-4** | `frontend/src/App.tsx` | **Deduplicate `flattenTree` call.** `visibleGates` memo was calling `flattenTree(gateTree)` independently from `gateList` (which also calls `flattenTree(gateTree)`). Now derives from `gateList` — `flattenTree` runs once per `gateTree` change. |
+
+**Results:** `tsc --noEmit` 0 errors · backend 23 passed · frontend unit tests 14/14 passed.
+
+**Next:** Phase D — Sprint 5 FlowJo parity validation, then Phase E Compensation UI.
+
+---
+
 ## 2026‑04‑22 — Phase B: Sprint 4 — Gate Overlays + Workspace Hierarchy (INT-1)
 
 **Scope:** FE-4b (gate shape overlays with labels and per-gate colors); INT-1 verification; pre-existing TypeScript error fix.

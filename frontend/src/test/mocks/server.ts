@@ -104,8 +104,11 @@ export function makeCollapsingEventsResponse(): { channel_names: string[]; event
 }
 
 export function makeDensityResponse() {
-  const bins = Array.from({ length: 200 }, () =>
-    Array.from({ length: 200 }, () => Math.floor(Math.random() * 50)),
+  // C-2: 10×10 instead of 200×200 — the large array was causing Node heap OOM
+  // during vitest re-runs. Resolution does not matter for integration tests.
+  const BINS = 10;
+  const bins = Array.from({ length: BINS }, () =>
+    Array.from({ length: BINS }, () => Math.floor(Math.random() * 50)),
   );
   return {
     file_id: "test-file-id",
@@ -117,8 +120,8 @@ export function makeDensityResponse() {
     x_max: 5.4,
     y_min: 0,
     y_max: 5.4,
-    bins_x: 200,
-    bins_y: 200,
+    bins_x: BINS,
+    bins_y: BINS,
     counts: bins,
   };
 }

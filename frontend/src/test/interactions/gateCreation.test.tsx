@@ -68,6 +68,9 @@ describe("Rectangle gate creation — click sequence", () => {
   });
 
   it("sends parent_gate_id when a gate is active", async () => {
+    // C-3 fix: was a false-green — the old test had an `if (gatePayloads.length > 0)`
+    // guard inside waitFor, so it passed vacuously when no gate was ever submitted.
+    // Now performs the full draw sequence and asserts unconditionally.
     useGateCapture({ id: "child-g", name: "Child", count: 200, pct_total: 5.0 });
 
     // Override gate tree to return one parent gate
@@ -83,6 +86,8 @@ describe("Rectangle gate creation — click sequence", () => {
             count: 150000,
             pct_total: 35.5,
             pct_of_parent: 35.5,
+            pct_of_total: 35.5,
+            parent_count: 422888,
             depth: 0,
             order: 0,
             x_channel: "FSC-A",
@@ -109,15 +114,32 @@ describe("Rectangle gate creation — click sequence", () => {
     await user.click(screen.getByText(/Browse FCS/i));
     await waitFor(() => screen.getByText(/Lymphocytes/));
 
-    // Click the parent gate in the tree panel
+    // Select parent gate — makes it the active gate; new gates drawn will be children.
     await user.click(screen.getByText(/Lymphocytes/));
-    // Now draw a child gate...
-    // (abbreviated — same draw sequence as above)
-    // Verify parent_gate_id is set
-    await waitFor(() => {
-      if (gatePayloads.length > 0) {
-        expect((gatePayloads[0] as any).parent_gate_id).toBe("parent-g");
-      }
-    });
+
+    // Ensure the draw overlay is mounted (draw mode activates after gate selection in tree)
+    await waitFor(() => expect(screen.getByTestId("gate-draw-overlay")).toBeInTheDocument());
+    const drawArea = screen.getByTestId("gate-draw-overlay") as HTMLElement;
+    const rect = { left: 68, top: 12, width: 400, height: 400, right: 468, bottom: 412 };
+    vi.spyOn(drawArea, "getBoundingClientRect").mockReturnValue(rect as DOMRect);
+
+    // Full draw sequence: mousedown → move → mouseup to produce a pending gate
+    await user.pointer([
+      { target: drawArea, coords: { clientX: 68 + 80,  clientY: 12 + 80  }, keys: "[MouseLeft>]" },
+      { target: drawArea, coords: { clientX: 68 + 240, clientY: 12 + 240 } },
+      { target: drawArea, coords: { clientX: 68 + 240, clientY: 12 + 240 }, keys: "[/MouseLeft]" },
+    ]);
+
+    // Name the gate and submit
+    await waitFor(() => screen.getByPlaceholderText(/Gate name/i));
+    await user.type(screen.getByPlaceholderText(/Gate name/i), "CD3+");
+    await user.click(screen.getByText(/Create gate/i));
+
+    // Unconditional assertion — gatePayloads must have exactly one entry
+    await waitFor(() => expect(gatePayloads.length).toBe(1));
+    const payload = gatePayloads[0] as any;
+    expect(payload.parent_gate_id).toBe("parent-g");
+    expect(payload.name).toBe("CD3+");
+    expect(payload.params.type).toBe("rectangle");
   });
 });

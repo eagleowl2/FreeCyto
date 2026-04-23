@@ -117,6 +117,17 @@ export const App: React.FC = () => {
   const [activeGateId, setActiveGateId] = React.useState<string | null>(null);
   const [gateTreeLoading, setGateTreeLoading] = React.useState(false);
   const [gateTreeError, setGateTreeError] = React.useState<string | null>(null);
+
+  // G: per-gate channel statistics
+  type ChannelStat = { channel_name: string; display_name: string; mean: number; median: number; sd: number; cv: number | null };
+  type GateStatsData = {
+    gate_id: string; gate_name: string; count: number;
+    pct_of_parent: number; pct_total: number;
+    channel_stats: ChannelStat[];
+  };
+  const [gateStats, setGateStats] = React.useState<GateStatsData | null>(null);
+  const [gateStatsLoading, setGateStatsLoading] = React.useState(false);
+  const [statsExpanded, setStatsExpanded] = React.useState(false);
   const gateList = React.useMemo(() => flattenTree(gateTree), [gateTree]);
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
@@ -791,6 +802,18 @@ export const App: React.FC = () => {
       }
     })();
   }, [health.status]);
+
+  // G: fetch stats when active gate changes and stats panel is open
+  React.useEffect(() => {
+    if (!activeGateId || !statsExpanded) {
+      if (!activeGateId) setGateStats(null);
+      return;
+    }
+    setGateStatsLoading(true);
+    void getJson<GateStatsData>(`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/stats`)
+      .then((data) => { setGateStats(data); setGateStatsLoading(false); })
+      .catch(() => { setGateStats(null); setGateStatsLoading(false); });
+  }, [activeGateId, statsExpanded]);
 
   React.useEffect(() => {
     if (file?.id) void fetchGateTree(file.id);
@@ -2716,6 +2739,183 @@ export const App: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* G: Statistics Panel */}
+          {file && (
+            <div
+              style={{
+                marginTop: "1rem",
+                borderRadius: "0.75rem",
+                border: "1px solid rgba(148,163,184,0.3)",
+                background: "rgba(15,23,42,0.5)",
+                overflow: "hidden",
+              }}
+            >
+              {/* Panel header / toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !statsExpanded;
+                  setStatsExpanded(next);
+                  // Eagerly fetch if opening with a gate selected
+                  if (next && activeGateId && !gateStats) {
+                    setGateStatsLoading(true);
+                    void getJson<GateStatsData>(`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/stats`)
+                      .then((d) => { setGateStats(d); setGateStatsLoading(false); })
+                      .catch(() => { setGateStats(null); setGateStatsLoading(false); });
+                  }
+                }}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "0.5rem 0.85rem",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#e5e7eb",
+                  fontSize: "0.78rem",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#9ca3af", fontWeight: 600 }}>
+                  Statistics
+                  {activeGateId && gateStats && (
+                    <span style={{ marginLeft: "0.5rem", color: "#64748b", fontWeight: 400, textTransform: "none" }}>
+                      — {gateStats.gate_name} ({gateStats.count.toLocaleString()} events, {gateStats.pct_of_parent.toFixed(1)}% of parent)
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{statsExpanded ? "▲" : "▼"}</span>
+              </button>
+
+              {statsExpanded && (
+                <div style={{ padding: "0 0.85rem 0.75rem" }}>
+                  {!activeGateId && (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b", paddingBottom: "0.5rem" }}>
+                      Select a gate to view per-channel statistics.
+                    </div>
+                  )}
+                  {activeGateId && gateStatsLoading && (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>Loading statistics…</div>
+                  )}
+                  {activeGateId && !gateStatsLoading && gateStats && (
+                    <>
+                      {/* CSV export */}
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.4rem" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rows = [
+                              ["Gate", gateStats.gate_name],
+                              ["Count", String(gateStats.count)],
+                              ["% of Parent", gateStats.pct_of_parent.toFixed(2)],
+                              ["% of Total", gateStats.pct_total.toFixed(2)],
+                              [],
+                              ["Channel", "MFI (mean)", "Median", "SD", "CV%"],
+                              ...gateStats.channel_stats.map((cs) => [
+                                cs.display_name || cs.channel_name,
+                                cs.mean.toFixed(2),
+                                cs.median.toFixed(2),
+                                cs.sd.toFixed(2),
+                                cs.cv != null ? cs.cv.toFixed(2) : "",
+                              ]),
+                            ];
+                            const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+                            const blob = new Blob([csv], { type: "text/csv" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = `${gateStats.gate_name.replace(/[^a-z0-9_-]/gi, "_")}_stats.csv`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          style={{
+                            padding: "0.2rem 0.55rem",
+                            borderRadius: "0.4rem",
+                            border: "1px solid rgba(148,163,184,0.5)",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            background: "rgba(30,41,59,0.6)",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          Export CSV
+                        </button>
+                      </div>
+                      {/* Stats table */}
+                      <div style={{ overflowX: "auto" }}>
+                        <table
+                          style={{
+                            width: "100%",
+                            borderCollapse: "collapse",
+                            fontSize: "0.75rem",
+                            color: "#e5e7eb",
+                          }}
+                        >
+                          <thead>
+                            <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
+                              {["Channel", "MFI", "Median", "SD", "CV%"].map((h) => (
+                                <th
+                                  key={h}
+                                  style={{
+                                    padding: "0.25rem 0.4rem",
+                                    textAlign: h === "Channel" ? "left" : "right",
+                                    color: "#9ca3af",
+                                    fontWeight: 500,
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {gateStats.channel_stats.map((cs, i) => (
+                              <tr
+                                key={cs.channel_name}
+                                style={{
+                                  background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
+                                }}
+                              >
+                                <td
+                                  style={{
+                                    padding: "0.2rem 0.4rem",
+                                    color: "#cbd5e1",
+                                    maxWidth: "12rem",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                  title={cs.display_name || cs.channel_name}
+                                >
+                                  {cs.display_name || cs.channel_name}
+                                </td>
+                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                  {cs.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                </td>
+                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                  {cs.median.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                </td>
+                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                  {cs.sd.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                </td>
+                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: cs.cv != null && cs.cv > 100 ? "#fbbf24" : "#e5e7eb" }}>
+                                  {cs.cv != null ? cs.cv.toFixed(1) : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         </div>
       </div>

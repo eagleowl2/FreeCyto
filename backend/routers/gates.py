@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Query
 
 from models.file_models import FileDensityResponse, FileEventsResponse
-from models.gate_models import GateCreateRequest, GateResponse
+from models.gate_models import GateCreateRequest, GateResponse, GateStatsResponse
 from services import gates as gates_service
 from services.gates import GateNameExistsError
 
@@ -161,6 +161,21 @@ async def get_gate_density(
     bins_y=by,
     counts=counts,
   )
+
+
+@router.get("/{gate_id}/stats", response_model=GateStatsResponse)
+async def get_gate_stats(gate_id: str) -> GateStatsResponse:
+  """Return per-channel descriptive statistics (MFI, median, SD, CV) for a gate's population.
+
+  All values are in **raw (untransformed) channel space** — matching FlowJo MFI convention.
+  Computed on the full unsampled population (no downsampling) for accuracy.
+  """
+  try:
+    return gates_service.get_gate_stats(gate_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"stats error: {exc!r}") from exc
 
 
 @router.delete("/{gate_id}")

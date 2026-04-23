@@ -1,6 +1,21 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑04‑22 (Phase D → F)
+> Last updated: 2026‑04‑23 (Phase G)
+
+---
+
+## 2026‑04‑23 — Phase G: Statistics Panel
+
+**Scope:** Per-gate channel statistics (MFI, median, SD, CV%) with CSV export.
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **G-1** | `backend/models/gate_models.py` | Added `ChannelStats` and `GateStatsResponse` Pydantic models. `ChannelStats` holds per-channel mean (MFI), median, SD, CV% — all in **raw (untransformed) channel space**, matching FlowJo's MFI convention. |
+| **G-2** | `backend/services/gates.py` | Added `get_gate_stats(gate_id)` which applies the cached gate mask to the full raw event matrix, then computes numpy descriptive stats per channel. Reuses `_get_mask` cache; calls `_compute_stats` if stats cache is stale. |
+| **G-3** | `backend/routers/gates.py` | New endpoint `GET /api/gates/{gate_id}/stats` → `GateStatsResponse`. Returns 404 if gate not found; 500 on unexpected errors. |
+| **G-4** | `frontend/src/App.tsx` | **Statistics panel** added below the plot+hierarchy row. Collapsible (▲/▼ toggle). When a gate is active and the panel is expanded, fetches stats eagerly. Shows: gate summary (count, % of parent) in header; per-channel table with MFI / Median / SD / CV% columns; CV% > 100 highlighted amber. **Export CSV** button downloads a CSV with gate summary + full channel stats table. |
+
+**Results:** `tsc --noEmit` 0 errors · 70 backend tests passed (all suites, includes parity tests skipped without fixture).
 
 ---
 

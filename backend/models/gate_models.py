@@ -4,7 +4,7 @@ interpreted at evaluation and workspace reload."""
 
 from __future__ import annotations
 
-from typing import Annotated, List, Literal
+from typing import Annotated, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -92,3 +92,24 @@ class GateResponse(BaseModel):
 
   # pct_total kept as field alias for FE transition; same value as pct_of_total (A-5).
   model_config = ConfigDict()
+
+
+class ChannelStats(BaseModel):
+  """Per-channel descriptive statistics for a gate population (raw, untransformed space)."""
+  channel_name: str = Field(..., description="$PnN – API contract key")
+  display_name: str = Field("", description="Human-readable label for the UI")
+  mean: float = Field(..., description="Arithmetic mean (MFI) of raw values inside the gate")
+  median: float = Field(..., description="Median of raw values inside the gate")
+  sd: float = Field(..., description="Sample standard deviation of raw values inside the gate")
+  cv: Optional[float] = Field(None, description="CV% = sd/mean*100; None when mean ≤ 0")
+
+
+class GateStatsResponse(BaseModel):
+  """Per-channel statistics for a gate population."""
+  gate_id: str
+  file_id: str
+  gate_name: str
+  count: int
+  pct_of_parent: float
+  pct_total: float
+  channel_stats: List[ChannelStats] = Field(default_factory=list)

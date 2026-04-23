@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 import numpy as np
 
-from models.gate_models import GateCreateRequest, GateResponse
+from models.gate_models import ChannelStats, GateCreateRequest, GateResponse, GateStatsResponse
 from services import storage, transforms as transform_service
 
 SUSPENDED_FILE_TTL_SECONDS = 60 * 60
@@ -760,6 +760,68 @@ def get_gate_density(
     bins_x,
     bins_y,
     counts.tolist(),
+  )
+
+
+def get_gate_stats(gate_id: str) -> GateStatsResponse:
+  """Return descriptive statistics (MFI, median, SD, CV) for all channels inside a gate's population.
+
+  All statistics are computed in **raw (untransformed) channel space** — this matches the FlowJo
+  convention for MFI reporting. The gate mask is reused from the cache when valid.
+  """
+  _cleanup_expired_suspended_files()
+  record = _store.gates_by_id.get(gate_id)
+  if record is None:
+    raise KeyError(f"Gate {gate_id!r} not found")
+
+  # Ensure stats cache is warm before reading cached pct values.
+  if not record._cache_valid:
+    _compute_stats(record)
+
+  mask = _get_mask(record)
+  raw_events = storage.get_file_events(record.file_id)  # always raw / compensated-raw, but not log-transformed
+  metadata = storage.get_file_metadata(record.file_id)
+
+  gate_events = raw_events[mask]  # shape (count, n_channels)
+  count = int(gate_events.shape[0])
+
+  channel_stats: list[ChannelStats] = []
+  for ch in metadata.channels:
+    idx = ch.index - 1
+    if idx < 0 or idx >= raw_events.shape[1]:
+      continue
+    if count == 0:
+      channel_stats.append(ChannelStats(
+        channel_name=ch.name,
+        display_name=ch.display_name or ch.name,
+        mean=0.0,
+        median=0.0,
+        sd=0.0,
+        cv=None,
+      ))
+      continue
+    vals = gate_events[:, idx].astype(float)
+    mean = float(np.mean(vals))
+    median = float(np.median(vals))
+    sd = float(np.std(vals, ddof=1)) if count > 1 else 0.0
+    cv = round(sd / mean * 100, 2) if mean > 0 else None
+    channel_stats.append(ChannelStats(
+      channel_name=ch.name,
+      display_name=ch.display_name or ch.name,
+      mean=round(mean, 2),
+      median=round(median, 2),
+      sd=round(sd, 2),
+      cv=cv,
+    ))
+
+  return GateStatsResponse(
+    gate_id=gate_id,
+    file_id=record.file_id,
+    gate_name=record.name,
+    count=count,
+    pct_of_parent=round(record._cached_pct_of_parent or 0.0, 2),
+    pct_total=round(record._cached_pct_total or 0.0, 2),
+    channel_stats=channel_stats,
   )
 
 

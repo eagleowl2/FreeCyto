@@ -19,6 +19,34 @@ import numpy as np
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 MAX_FILES_PER_LOAD = 64
+
+_LOGICLE_T_DEFAULT = 262144.0
+_LOGICLE_W_DEFAULT = 0.5
+_LOGICLE_M_DEFAULT = 4.5
+_LOGICLE_A_DEFAULT = 0.0
+
+
+def _resolve_logicle_t(t_param: Optional[float], channel_range: Optional[float]) -> float:
+  """Return effective logicle T: explicit query param → $PnR channel range → 262144 fallback."""
+  if t_param is not None:
+    return float(t_param)
+  if channel_range is not None:
+    return float(channel_range)
+  return _LOGICLE_T_DEFAULT
+
+
+def _build_logicle_kwargs(
+  t: float,
+  w: Optional[float],
+  m: Optional[float],
+  a: Optional[float],
+) -> dict:
+  return {
+    "logicle_t": t,
+    "logicle_w": w if w is not None else _LOGICLE_W_DEFAULT,
+    "logicle_m": m if m is not None else _LOGICLE_M_DEFAULT,
+    "logicle_a": a if a is not None else _LOGICLE_A_DEFAULT,
+  }
 MAX_SINGLE_FILE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_TOTAL_LOAD_BYTES = 8 * 1024 * 1024 * 1024
 MAX_PATH_CHARS = 4096
@@ -120,11 +148,18 @@ async def get_events(
   transform_x: Optional[str] = Query(None, description="linear | log | arcsinh | logicle"),
   transform_y: Optional[str] = Query(None, description="linear | log | arcsinh | logicle"),
   arcsinh_cofactor: float = Query(150.0, description="Cofactor for arcsinh (e.g. 150 fluo, 5 CyTOF)"),
+  logicle_t: Optional[float] = Query(None, description="Logicle T (max scale). Defaults to $PnR when absent."),
+  logicle_w: Optional[float] = Query(None, description="Logicle W (linear width). Default 0.5."),
+  logicle_m: Optional[float] = Query(None, description="Logicle M (decades). Default 4.5."),
+  logicle_a: Optional[float] = Query(None, description="Logicle A (additional negative). Default 0.0."),
 ) -> FileEventsResponse:
   """Return downsampled events for a loaded file.
 
   If x_channel and/or y_channel are provided, only those channels are returned.
   Optional transform_x/transform_y apply per-axis transforms before returning.
+
+  For logicle transforms, T defaults to $PnR (detector range) of the respective channel
+  when logicle_t is not supplied, falling back to 262144 if $PnR is absent.
   """
   try:
     metadata = storage.get_file_metadata(file_id)
@@ -135,6 +170,7 @@ async def get_events(
     raise HTTPException(status_code=500, detail=f"events error: {exc!r}") from exc
 
   # Determine which channel columns to return
+  channel_by_name = {ch.name: ch for ch in metadata.channels}
   channel_order = metadata.channels
   if x_channel or y_channel:
     wanted = [name for name in (x_channel, y_channel) if name]
@@ -152,16 +188,24 @@ async def get_events(
     sub_events = events.copy()
     channel_names = [ch.name for ch in channel_order]
 
-  # Apply per-column transforms when exactly two columns (x and y)
-  kwargs = {"arcsinh_cofactor": arcsinh_cofactor}
+  # Per-axis transforms — logicle T is resolved per-channel from $PnR when not supplied
+  base_kwargs = {"arcsinh_cofactor": arcsinh_cofactor}
   if sub_events.shape[1] >= 1 and transform_x and transform_x in transform_service.TRANSFORMS:
-    sub_events[:, 0] = transform_service.apply_transform(
-      sub_events[:, 0], transform_x, **kwargs
-    )
+    if transform_x == "logicle":
+      ch_meta = channel_by_name.get(x_channel or "") if x_channel else None
+      t = _resolve_logicle_t(logicle_t, ch_meta.range if ch_meta else None)
+      kw = {**base_kwargs, **_build_logicle_kwargs(t, logicle_w, logicle_m, logicle_a)}
+    else:
+      kw = base_kwargs
+    sub_events[:, 0] = transform_service.apply_transform(sub_events[:, 0], transform_x, **kw)
   if sub_events.shape[1] >= 2 and transform_y and transform_y in transform_service.TRANSFORMS:
-    sub_events[:, 1] = transform_service.apply_transform(
-      sub_events[:, 1], transform_y, **kwargs
-    )
+    if transform_y == "logicle":
+      ch_meta = channel_by_name.get(y_channel or "") if y_channel else None
+      t = _resolve_logicle_t(logicle_t, ch_meta.range if ch_meta else None)
+      kw = {**base_kwargs, **_build_logicle_kwargs(t, logicle_w, logicle_m, logicle_a)}
+    else:
+      kw = base_kwargs
+    sub_events[:, 1] = transform_service.apply_transform(sub_events[:, 1], transform_y, **kw)
 
   try:
     events_list = sub_events.astype(float).tolist()
@@ -190,11 +234,18 @@ async def get_density(
     150.0,
     description="Cofactor for arcsinh (e.g. 150 fluo, 5 CyTOF). Only used when transform_* == 'arcsinh'.",
   ),
+  logicle_t: Optional[float] = Query(None, description="Logicle T (max scale). Defaults to $PnR when absent."),
+  logicle_w: Optional[float] = Query(None, description="Logicle W (linear width). Default 0.5."),
+  logicle_m: Optional[float] = Query(None, description="Logicle M (decades). Default 4.5."),
+  logicle_a: Optional[float] = Query(None, description="Logicle A (additional negative). Default 0.0."),
 ) -> FileDensityResponse:
   """Return a 2D density histogram for a pair of channels.
 
   The histogram is computed in the **transformed** space (after applying any requested
   per-axis transforms) so that gate coordinates and overlays align with the axes.
+
+  For logicle transforms, T defaults to $PnR of the respective channel when logicle_t
+  is not supplied, falling back to 262144 when $PnR is absent.
   """
   try:
     metadata = storage.get_file_metadata(file_id)
@@ -215,12 +266,22 @@ async def get_density(
   x = events[:, ch_x.index - 1].astype(float)
   y = events[:, ch_y.index - 1].astype(float)
 
-  # Apply transforms in the same way as /events
-  kwargs = {"arcsinh_cofactor": arcsinh_cofactor}
+  # Per-axis transforms — logicle T resolved per-channel from $PnR when not supplied
+  base_kwargs = {"arcsinh_cofactor": arcsinh_cofactor}
   if transform_x and transform_x in transform_service.TRANSFORMS:
-    x = transform_service.apply_transform(x, transform_x, **kwargs)
+    if transform_x == "logicle":
+      t = _resolve_logicle_t(logicle_t, ch_x.range)
+      kw = {**base_kwargs, **_build_logicle_kwargs(t, logicle_w, logicle_m, logicle_a)}
+    else:
+      kw = base_kwargs
+    x = transform_service.apply_transform(x, transform_x, **kw)
   if transform_y and transform_y in transform_service.TRANSFORMS:
-    y = transform_service.apply_transform(y, transform_y, **kwargs)
+    if transform_y == "logicle":
+      t = _resolve_logicle_t(logicle_t, ch_y.range)
+      kw = {**base_kwargs, **_build_logicle_kwargs(t, logicle_w, logicle_m, logicle_a)}
+    else:
+      kw = base_kwargs
+    y = transform_service.apply_transform(y, transform_y, **kw)
 
   # Compute axis ranges in transformed space; expand degenerate ranges slightly
   x_min = float(np.min(x))

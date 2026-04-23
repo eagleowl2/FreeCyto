@@ -15,6 +15,10 @@ import numpy as np
 from models.gate_models import ChannelStats, GateCreateRequest, GateResponse, GateStatsResponse
 from services import storage, transforms as transform_service
 
+# Default logicle parameter values; also used as "not-yet-set" sentinels in auto-derivation.
+_DEFAULT_LOGICLE_T = 262144.0
+_DEFAULT_LOGICLE_W = 0.5
+
 SUSPENDED_FILE_TTL_SECONDS = 60 * 60
 
 
@@ -380,6 +384,30 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
   else:
     order = body.order
 
+  # Auto-derive logicle T from $PnR (and W from negative data) when the caller
+  # left logicle_T at its default sentinel value (262144.0). This ensures the
+  # stored gate uses the channel's actual detector range as the scale ceiling,
+  # which matches FlowJo / GatingML logicle parameterisation.
+  eff_logicle_T = body.logicle_T
+  eff_logicle_W = body.logicle_W
+  if (body.transform_x == "logicle" or body.transform_y == "logicle") and body.logicle_T == _DEFAULT_LOGICLE_T:
+    _meta = storage.get_file_metadata(body.file_id)
+    _ch_map = {ch.name: ch for ch in _meta.channels}
+    # Primary channel: prefer whichever axis is logicle (x takes precedence over y)
+    _pnr_ch_name = body.x_channel if body.transform_x == "logicle" else body.y_channel
+    _pnr_ch = _ch_map.get(_pnr_ch_name)
+    if _pnr_ch is not None and _pnr_ch.range is not None:
+      eff_logicle_T = float(_pnr_ch.range)
+      # Also auto-derive W from negative-value distribution when W is at default.
+      if body.logicle_W == _DEFAULT_LOGICLE_W:
+        _events_for_w = storage.get_file_events(body.file_id)
+        _xi = _pnr_ch.index - 1
+        if 0 <= _xi < _events_for_w.shape[1]:
+          _params = transform_service.estimate_logicle_params(
+            _events_for_w[:, _xi], instrument_range=_pnr_ch.range
+          )
+          eff_logicle_W = _params["W"]
+
   if p.type == "rectangle":
     record = GateRecord(
       id=gate_id,
@@ -394,8 +422,8 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
       transform_x=body.transform_x,
       transform_y=body.transform_y,
       arcsinh_cofactor=body.arcsinh_cofactor,
-      logicle_T=body.logicle_T,
-      logicle_W=body.logicle_W,
+      logicle_T=eff_logicle_T,
+      logicle_W=eff_logicle_W,
       logicle_M=body.logicle_M,
       logicle_A=body.logicle_A,
       x_min=p.x_min,
@@ -417,8 +445,8 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
       transform_x=body.transform_x,
       transform_y=body.transform_y,
       arcsinh_cofactor=body.arcsinh_cofactor,
-      logicle_T=body.logicle_T,
-      logicle_W=body.logicle_W,
+      logicle_T=eff_logicle_T,
+      logicle_W=eff_logicle_W,
       logicle_M=body.logicle_M,
       logicle_A=body.logicle_A,
       vertices=p.vertices,

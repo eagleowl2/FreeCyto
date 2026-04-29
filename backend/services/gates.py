@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 import numpy as np
 
-from models.gate_models import ChannelStats, GateCreateRequest, GateResponse, GateStatsResponse
+from models.gate_models import ChannelStats, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate
 from services import storage, transforms as transform_service
 
 # Default logicle parameter values; also used as "not-yet-set" sentinels in auto-derivation.
@@ -271,31 +271,39 @@ def _get_mask(record: GateRecord, _visited: frozenset[str] | None = None) -> np.
       parent_mask = _get_mask(parent, visited)
 
   xi = _channel_name_to_index(record.file_id, record.x_channel)
-  yi = _channel_name_to_index(record.file_id, record.y_channel)
   kwargs = _transform_kwargs(record)
   x = transform_service.apply_transform(
     events[:, xi].astype(np.float64), record.transform_x, **kwargs
   )
-  y = transform_service.apply_transform(
-    events[:, yi].astype(np.float64), record.transform_y, **kwargs
-  )
 
-  if record.type == "rectangle":
-    if (
-      record.x_min is None or record.y_min is None
-      or record.x_max is None or record.y_max is None
-    ):
+  if record.type == "interval":
+    # 1-D gate: only x_channel is needed; y_channel is empty string for interval gates.
+    if record.x_min is None or record.x_max is None:
       gate_mask = np.zeros(n_total, dtype=bool)
     else:
-      gate_mask = _point_in_rect(
-        x, y,
-        record.x_min, record.y_min,
-        record.x_max, record.y_max,
-      )
-  elif record.type == "polygon" and record.vertices:
-    gate_mask = _point_in_polygon(x, y, record.vertices)
+      gate_mask = (x >= record.x_min) & (x <= record.x_max)
   else:
-    gate_mask = np.zeros(n_total, dtype=bool)
+    # 2-D gates (rectangle, polygon): also need y channel.
+    yi = _channel_name_to_index(record.file_id, record.y_channel)
+    y = transform_service.apply_transform(
+      events[:, yi].astype(np.float64), record.transform_y, **kwargs
+    )
+    if record.type == "rectangle":
+      if (
+        record.x_min is None or record.y_min is None
+        or record.x_max is None or record.y_max is None
+      ):
+        gate_mask = np.zeros(n_total, dtype=bool)
+      else:
+        gate_mask = _point_in_rect(
+          x, y,
+          record.x_min, record.y_min,
+          record.x_max, record.y_max,
+        )
+    elif record.type == "polygon" and record.vertices:
+      gate_mask = _point_in_polygon(x, y, record.vertices)
+    else:
+      gate_mask = np.zeros(n_total, dtype=bool)
 
   if parent_mask is not None:
     gate_mask = gate_mask & parent_mask
@@ -408,49 +416,24 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
           )
           eff_logicle_W = _params["W"]
 
+  _common = dict(
+    id=gate_id, file_id=body.file_id, name=body.name,
+    x_channel=body.x_channel, y_channel=body.y_channel,
+    parent_gate_id=parent_gate_id, order=order, depth=depth,
+    transform_x=body.transform_x, transform_y=body.transform_y,
+    arcsinh_cofactor=body.arcsinh_cofactor,
+    logicle_T=eff_logicle_T, logicle_W=eff_logicle_W,
+    logicle_M=body.logicle_M, logicle_A=body.logicle_A,
+  )
   if p.type == "rectangle":
-    record = GateRecord(
-      id=gate_id,
-      file_id=body.file_id,
-      name=body.name,
-      type="rectangle",
-      x_channel=body.x_channel,
-      y_channel=body.y_channel,
-      parent_gate_id=parent_gate_id,
-      order=order,
-      depth=depth,
-      transform_x=body.transform_x,
-      transform_y=body.transform_y,
-      arcsinh_cofactor=body.arcsinh_cofactor,
-      logicle_T=eff_logicle_T,
-      logicle_W=eff_logicle_W,
-      logicle_M=body.logicle_M,
-      logicle_A=body.logicle_A,
-      x_min=p.x_min,
-      y_min=p.y_min,
-      x_max=p.x_max,
-      y_max=p.y_max,
-    )
+    record = GateRecord(**_common, type="rectangle",
+      x_min=p.x_min, y_min=p.y_min, x_max=p.x_max, y_max=p.y_max)
+  elif p.type == "interval":
+    record = GateRecord(**_common, type="interval",
+      x_min=p.x_min, x_max=p.x_max,
+      y_min=None, y_max=None)
   else:
-    record = GateRecord(
-      id=gate_id,
-      file_id=body.file_id,
-      name=body.name,
-      type="polygon",
-      x_channel=body.x_channel,
-      y_channel=body.y_channel,
-      parent_gate_id=parent_gate_id,
-      order=order,
-      depth=depth,
-      transform_x=body.transform_x,
-      transform_y=body.transform_y,
-      arcsinh_cofactor=body.arcsinh_cofactor,
-      logicle_T=eff_logicle_T,
-      logicle_W=eff_logicle_W,
-      logicle_M=body.logicle_M,
-      logicle_A=body.logicle_A,
-      vertices=p.vertices,
-    )
+    record = GateRecord(**_common, type="polygon", vertices=p.vertices)
 
   _store.gates_by_id[gate_id] = record
   # Insert new gate ID into sibling list and renumber orders
@@ -581,6 +564,39 @@ def delete_gate(gate_id: str) -> list[str]:
     _store.root_children[file_id] = [g for g in lst if g != gate_id]
   _evict_gate_subtree(gate_id)
   return deleted_ids
+
+
+def update_gate(gate_id: str, body: GateUpdateRequest) -> GateResponse:
+  """Update gate geometry in-place; invalidates mask/stats for the gate and all descendants."""
+  record = _store.gates_by_id.get(gate_id)
+  if record is None:
+    raise KeyError(f"Gate {gate_id!r} not found")
+  if record.file_id in _store.suspended_files:
+    raise KeyError(f"File for gate {gate_id!r} is not currently loaded")
+  if record.type == "rectangle":
+    if body.x_min is not None:
+      record.x_min = body.x_min
+    if body.y_min is not None:
+      record.y_min = body.y_min
+    if body.x_max is not None:
+      record.x_max = body.x_max
+    if body.y_max is not None:
+      record.y_max = body.y_max
+  elif record.type == "polygon":
+    if body.vertices is not None:
+      if len(body.vertices) < 3:
+        raise ValueError("Polygon gate must have at least 3 vertices")
+      record.vertices = body.vertices
+  elif record.type == "interval":
+    if body.x_min is not None:
+      record.x_min = body.x_min
+    if body.x_max is not None:
+      record.x_max = body.x_max
+  else:
+    raise ValueError(f"Unsupported gate type for update: {record.type!r}")
+  invalidate_subtree(gate_id)
+  _compute_stats(record)
+  return _record_to_response(record)
 
 
 def get_gate_tree(file_id: str) -> list[GateResponse]:

@@ -1,6 +1,34 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑04‑23 (Phase G)
+> Last updated: 2026‑04‑27 (Phase H)
+
+---
+
+## 2026‑04‑27 — Phase H: Moveable Gates + Undo/Redo + Keyboard Shortcuts
+
+**Scope:** Let users edit gates after drawing them; undo/redo for all gate operations; keyboard shortcuts.
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **H-1** | `backend/models/gate_models.py` | Added `GateUpdateRequest` Pydantic model — optional `x_min/y_min/x_max/y_max` for rectangle bounds, `vertices` for polygon vertex replacement. Coordinates stay in transformed space (same as creation). |
+| **H-1** | `backend/services/gates.py` | Added `update_gate(gate_id, body)` function. Applies new bounds/vertices to the stored `GateRecord`, calls `invalidate_subtree` to drop cached masks for the gate and all descendants, then calls `_compute_stats` to recompute count/% with the new geometry. Returns updated `GateResponse`. Raises `KeyError` for unknown/suspended gates; `ValueError` for bad polygon vertex count. |
+| **H-1** | `backend/routers/gates.py` | New `PATCH /api/gates/{gate_id}` endpoint wired to `gates_service.update_gate`. Fires `_snapshot_session_async()` on success so session auto-save reflects the moved gate. |
+| **H-2** | `frontend/src/App.tsx` | **Undo/redo stacks** (`undoStackRef`, `redoStackRef`). `UndoAction` discriminated union: `create` (single gate), `create_batch` (quadrant — 4 IDs), `update` (bounds before/after). Every successful gate create pushes a `create`/`create_batch` entry and clears redo. Every successful drag-commit pushes an `update` entry. Stack capped at 50 entries. |
+| **H-3** | `frontend/src/App.tsx` | **Moveable rectangle gates.** SVG `pointerEvents` changed from hardcoded `"none"` to `drawMode ? "none" : "auto"`. Background plot `<rect>` gets `pointerEvents: "none"` so it doesn't block gate hits. Rectangle gate `<g>` elements now carry `onMouseDown` for drag-to-move (`cursor: grab`) and four 8×8px corner handles (`onMouseDown` with mode `resize-nw/ne/sw/se`, directional cursor). `dragRef` captures gate ID, drag mode, original bounds, and SVG/plot metrics at drag start. |
+| **H-3** | `frontend/src/App.tsx` | **Window-level drag handlers** (new `useEffect`). `mousemove` computes data-space delta from client-pixel delta using captured SVG metrics; updates `previewGate` state for live visual feedback. `mouseup` commits the final bounds via `PATCH /api/gates/{id}`, pushes an `update` undo entry, clears redo, and refetches the gate tree. Tiny moves (<3 px) are ignored (treated as accidental clicks). |
+| **H-3** | `frontend/src/App.tsx` | Gate overlay rendering uses `previewGate` bounds during drag for smooth real-time preview; reverts to tree bounds on commit/cancel. |
+| **H-4** | `frontend/src/App.tsx` | **Keyboard shortcuts** (new `useEffect`). `Ctrl+Z` — undo last `create`/`create_batch` (DELETEs created gate(s)) or last `update` (PATCHes old bounds). `Ctrl+Y` / `Ctrl+Shift+Z` — redo last undone `update` (re-PATCHes new bounds). `Delete` — deletes the currently active gate without confirmation when not in draw mode. All shortcuts refetch the gate tree on success. |
+| **H-4** | `frontend/src/App.tsx` | Added `patchJson<T>()` helper (mirror of existing `postJson`) for PATCH requests. |
+| **H-5** | `backend/tests/test_backend_workflow.py` | **`TestGateUpdate`** — 5 new tests: `H-UPDATE-1` wider bounds captures more events; `H-UPDATE-2` gate ID/name/channels unchanged after update; `H-UPDATE-3` descendant cache invalidated when parent geometry changes; `H-UPDATE-4` unknown gate raises `KeyError`; `H-UPDATE-5` updated count matches direct NumPy evaluation of new bounds. |
+
+**Results:** `tsc --noEmit` 0 errors · 5/5 new `TestGateUpdate` tests pass · 111 backend tests pass (1 skipped: `REPRO-5` requires FCS fixture in-memory, pre-existing `MemoryError` in CI environment unrelated to Phase H).
+
+**Known limitations (Phase H):**
+- Polygon gates are NOT moveable yet — body has no drag handler; vertex-by-vertex editing is Phase I.
+- Undo of gate **delete** (via the × button in GateTreePanel) is not recorded — delete remains final. Redo of gate **create** is not stored (undo-create deletes the gate; re-drawing is the redo).
+- Undo stack is in-memory only; not persisted to workspace JSON yet.
+
+**Next:** Phase I — Quad gates (already UI-stub exists), 1-D histogram/interval gates, polygon drag support.
 
 ---
 

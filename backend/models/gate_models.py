@@ -36,8 +36,15 @@ class PolygonGateCreate(BaseModel):
   vertices: List[List[float]] = Field(..., min_length=3, description="At least 3 [x, y] in transformed space")
 
 
+class IntervalGateCreate(BaseModel):
+  """1-D range gate on a single channel (histogram interval). y_channel is unused."""
+  type: Literal["interval"]
+  x_min: float
+  x_max: float
+
+
 GateParamsCreate = Annotated[
-  RectangleGateCreate | PolygonGateCreate,
+  RectangleGateCreate | PolygonGateCreate | IntervalGateCreate,
   Field(discriminator="type"),
 ]
 
@@ -47,7 +54,7 @@ class GateCreateRequest(BaseModel):
   file_id: str
   name: str = Field(..., min_length=1, description="Display name for the gate")
   x_channel: str = Field(..., description="Channel name for X axis")
-  y_channel: str = Field(..., description="Channel name for Y axis")
+  y_channel: str = Field("", description="Channel name for Y axis (empty string for interval gates)")
   parent_gate_id: str | None = Field(None, description="Parent gate id for hierarchical gating")
   order: int = Field(-1, description="Order among siblings (0-based); -1 = append at end")
   transform_x: str = "linear"
@@ -92,6 +99,16 @@ class GateResponse(BaseModel):
 
   # pct_total kept as field alias for FE transition; same value as pct_of_total (A-5).
   model_config = ConfigDict()
+
+
+class GateUpdateRequest(BaseModel):
+  """Update gate geometry in-place. Coordinates in transformed space (same as plot view).
+  Provide x_min/y_min/x_max/y_max for rectangle gates, vertices for polygon gates."""
+  x_min: float | None = None
+  y_min: float | None = None
+  x_max: float | None = None
+  y_max: float | None = None
+  vertices: List[List[float]] | None = None
 
 
 class ChannelStats(BaseModel):

@@ -85,6 +85,17 @@ class FileDensityResponse(BaseModel):
   counts: List[List[float]]
 
 
+class FileHistogramResponse(BaseModel):
+  """1-D histogram for a single channel (for histogram plot mode and interval gating)."""
+  file_id: str
+  channel: str
+  transform: str
+  bin_edges: List[float] = Field(..., description="n+1 edges in transformed space")
+  counts: List[int] = Field(..., description="n bin counts")
+  x_min: float
+  x_max: float
+
+
 class CompensationApplyRequest(BaseModel):
   file_id: str = Field(..., description="ID of the file to compensate")
   spillover: List[List[float]] = Field(

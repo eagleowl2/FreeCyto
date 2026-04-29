@@ -25,6 +25,29 @@ type LoadedFile = {
 
 type ScatterPoint = { x: number; y: number };
 
+type BoundsSnapshot = { x_min: number; y_min: number; x_max: number; y_max: number };
+type UndoAction =
+  | { type: "create"; gateId: string }
+  | { type: "create_batch"; gateIds: string[] }
+  | { type: "update"; gateId: string; old: BoundsSnapshot; new: BoundsSnapshot };
+type HistogramData = {
+  binEdges: number[];
+  counts: number[];
+  xMin: number;
+  xMax: number;
+};
+type DragState = {
+  gateId: string;
+  gateType: "rectangle" | "polygon";
+  mode: "move" | "resize-nw" | "resize-ne" | "resize-sw" | "resize-se";
+  startClientX: number; startClientY: number;
+  origBounds: BoundsSnapshot;
+  origVertices?: number[][];
+  containerWidth: number;
+  plotW: number; plotH: number; ml: number; mt: number; plotAreaW: number; plotAreaH: number;
+  xMin: number; xMax: number; yMin: number; yMax: number;
+};
+
 const API_BASE = "http://127.0.0.1:8765";
 const DEFAULT_X_TRANSFORM: "linear" | "log" | "arcsinh" | "logicle" = "log";
 const DEFAULT_Y_TRANSFORM: "linear" | "log" | "arcsinh" | "logicle" = "linear";
@@ -71,6 +94,19 @@ async function getJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function patchJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return (await res.json()) as T;
+}
+
 export const App: React.FC = () => {
   const [health, setHealth] = React.useState<HealthState>({ status: "idle" });
 
@@ -87,7 +123,7 @@ export const App: React.FC = () => {
   const [channels, setChannels] = React.useState<ChannelInfo[]>([]);
   const [xChannel, setXChannel] = React.useState("");
   const [yChannel, setYChannel] = React.useState("");
-  const [plotMode, setPlotMode] = React.useState<"points" | "density">("density");
+  const [plotMode, setPlotMode] = React.useState<"points" | "density" | "histogram">("density");
   const [densityColormap, setDensityColormap] = React.useState<DensityColormap>("jet");
   const [densityDisplayScale, setDensityDisplayScale] = React.useState<DensityScale>("log");
   const [plotBgMode, setPlotBgMode] = React.useState<"dark" | "white">(() => {
@@ -151,7 +187,7 @@ export const App: React.FC = () => {
     nyMax: number;
     gateName: string;
   } | null>(null);
-  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | null>("rectangle");
+  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "interval" | null>("rectangle");
   const [drawMode, setDrawMode] = React.useState(false);
   const [drawingPolygon, setDrawingPolygon] = React.useState<{ points: { x: number; y: number }[] } | null>(null);
   const [fcsStatus, setFcsStatus] = React.useState<
@@ -161,6 +197,21 @@ export const App: React.FC = () => {
   const [debugLogPath, setDebugLogPath] = React.useState<string>("");
   const [debugUiStatus, setDebugUiStatus] = React.useState<string>("");
   const [debugLastRuntimeError, setDebugLastRuntimeError] = React.useState<string>("");
+
+  // H: undo/redo stacks (refs = no re-render on push/pop; only keyboard effects use them)
+  const undoStackRef = React.useRef<UndoAction[]>([]);
+  const redoStackRef = React.useRef<UndoAction[]>([]);
+  // H: gate drag state (ref = no re-render during mousemove; previewGate is the visual state)
+  const dragRef = React.useRef<DragState | null>(null);
+  const [previewGate, setPreviewGate] = React.useState<
+    | (BoundsSnapshot & { id: string; kind: "rect" })
+    | { id: string; kind: "poly"; vertices: number[][] }
+    | null
+  >(null);
+  // I: histogram + interval gate state
+  const [histData, setHistData] = React.useState<HistogramData | null>(null);
+  const [drawingInterval, setDrawingInterval] = React.useState<{ startX: number; endX: number } | null>(null);
+  const [pendingInterval, setPendingInterval] = React.useState<{ xMin: number; xMax: number; gateName: string } | null>(null);
 
   /** Monotonic id for plot data fetches; stale responses must not overwrite React state (see FRONTEND_REVIEW #1). */
   const plotRequestGenerationRef = React.useRef(0);
@@ -404,6 +455,25 @@ export const App: React.FC = () => {
     [],
   );
 
+  // I: fetch 1-D histogram from backend; optionally restricted to a gate population
+  const fetchHistogramAndPlot = React.useCallback(
+    async (fileId: string, channel: string, transform: string, plotGeneration: number, gateId?: string | null) => {
+      type HistResp = { bin_edges: number[]; counts: number[]; x_min: number; x_max: number };
+      const params = new URLSearchParams({ channel, transform, bins: "256" });
+      if (gateId) params.set("gate_id", gateId);
+      const resp = await getJson<HistResp>(
+        `${API_BASE}/api/files/${encodeURIComponent(fileId)}/histogram?${params}`,
+      );
+      if (plotGeneration !== plotRequestGenerationRef.current) return;
+      const maxCount = resp.counts.length ? Math.max(...resp.counts) : 1;
+      setHistData({ binEdges: resp.bin_edges, counts: resp.counts, xMin: resp.x_min, xMax: resp.x_max });
+      setTransformedRange({ xMin: resp.x_min, xMax: resp.x_max, yMin: 0, yMax: maxCount });
+      setDensity(null);
+      setPoints([]);
+    },
+    [],
+  );
+
   /** Always pass an explicit path from the browse dialog (`paths[0]`). */
   const handleLoadFcs = React.useCallback(async (path: string) => {
     const pathTrim = path.trim();
@@ -512,9 +582,14 @@ export const App: React.FC = () => {
     setFcsStatus("loading");
     setTransformedRange(null);
     setDensity(null);
+    setHistData(null);
     void (async () => {
       try {
-        if (activeGateId) {
+        if (plotMode === "histogram") {
+          // Histogram mode uses only x-channel
+          await fetchHistogramAndPlot(file.id, xChannel, transformX, plotGeneration, activeGateId);
+          if (plotGeneration === plotRequestGenerationRef.current) setFcsStatus("loaded");
+        } else if (activeGateId) {
           if (plotMode === "density") {
             await fetchGateDensityAndPlot(
               activeGateId,
@@ -600,6 +675,7 @@ export const App: React.FC = () => {
     fetchEventsAndPlot,
     fetchDensityAndPlot,
     fetchGateDensityAndPlot,
+    fetchHistogramAndPlot,
   ]);
 
   const fetchGateTree = React.useCallback(async (fileId: string) => {
@@ -859,6 +935,174 @@ export const App: React.FC = () => {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [drawMode, gateTool]);
+
+  // H: global keyboard shortcuts — Ctrl+Z (undo), Ctrl+Y (redo), Delete (delete active gate)
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        const entry = undoStackRef.current.at(-1);
+        if (!entry || !file) return;
+        undoStackRef.current = undoStackRef.current.slice(0, -1);
+        void (async () => {
+          try {
+            if (entry.type === "create") {
+              await fetch(`${API_BASE}/api/gates/${encodeURIComponent(entry.gateId)}`, { method: "DELETE" });
+              if (activeGateId === entry.gateId) setActiveGateId(null);
+              redoStackRef.current = [...redoStackRef.current, entry];
+            } else if (entry.type === "create_batch") {
+              for (const gid of [...entry.gateIds].reverse()) {
+                await fetch(`${API_BASE}/api/gates/${encodeURIComponent(gid)}`, { method: "DELETE" });
+              }
+              if (entry.gateIds.includes(activeGateId ?? "")) setActiveGateId(null);
+              redoStackRef.current = [...redoStackRef.current, entry];
+            } else if (entry.type === "update") {
+              await patchJson(`${API_BASE}/api/gates/${encodeURIComponent(entry.gateId)}`, entry.old);
+              redoStackRef.current = [...redoStackRef.current, { ...entry, old: entry.new, new: entry.old }];
+            }
+            await fetchGateTree(file.id);
+          } catch {
+            undoStackRef.current = [...undoStackRef.current, entry];
+          }
+        })();
+      } else if (ctrl && (e.key === "y" || (e.shiftKey && e.key === "Z"))) {
+        e.preventDefault();
+        const entry = redoStackRef.current.at(-1);
+        if (!entry || !file) return;
+        redoStackRef.current = redoStackRef.current.slice(0, -1);
+        void (async () => {
+          try {
+            if (entry.type === "update") {
+              await patchJson(`${API_BASE}/api/gates/${encodeURIComponent(entry.gateId)}`, entry.old);
+              undoStackRef.current = [...undoStackRef.current, { ...entry, old: entry.new, new: entry.old }];
+            }
+            await fetchGateTree(file.id);
+          } catch {
+            redoStackRef.current = [...redoStackRef.current, entry];
+          }
+        })();
+      } else if (e.key === "Delete" && !drawMode && !pendingGate && activeGateId && file) {
+        e.preventDefault();
+        void (async () => {
+          try {
+            await fetch(`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}`, { method: "DELETE" });
+            setActiveGateId(null);
+            await fetchGateTree(file.id);
+          } catch { /* ignore */ }
+        })();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [file, activeGateId, drawMode, pendingGate, fetchGateTree]);
+
+  // H/I: window-level mousemove/mouseup for smooth gate dragging (rect resize/move + polygon move)
+  React.useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const ds = dragRef.current;
+      if (!ds) return;
+      const clientDX = e.clientX - ds.startClientX;
+      const clientDY = e.clientY - ds.startClientY;
+      const dataDX = (clientDX / ds.containerWidth) * ds.plotW / ds.plotAreaW * (ds.xMax - ds.xMin);
+      const dataDY = -(clientDY / ds.containerWidth) * ds.plotH / ds.plotAreaH * (ds.yMax - ds.yMin);
+
+      if (ds.gateType === "polygon" && ds.origVertices) {
+        // Polygon: translate all vertices by the delta (move only)
+        const newVerts = ds.origVertices.map(([vx, vy]) => [vx + dataDX, vy + dataDY]);
+        setPreviewGate({ id: ds.gateId, kind: "poly", vertices: newVerts });
+        return;
+      }
+
+      // Rectangle: apply resize or move to bounds
+      const o = ds.origBounds;
+      let b: BoundsSnapshot;
+      if (ds.mode === "move") {
+        b = { x_min: o.x_min + dataDX, y_min: o.y_min + dataDY, x_max: o.x_max + dataDX, y_max: o.y_max + dataDY };
+      } else if (ds.mode === "resize-nw") {
+        b = { ...o, x_min: o.x_min + dataDX, y_max: o.y_max + dataDY };
+      } else if (ds.mode === "resize-ne") {
+        b = { ...o, x_max: o.x_max + dataDX, y_max: o.y_max + dataDY };
+      } else if (ds.mode === "resize-sw") {
+        b = { ...o, x_min: o.x_min + dataDX, y_min: o.y_min + dataDY };
+      } else {
+        b = { ...o, x_max: o.x_max + dataDX, y_min: o.y_min + dataDY };
+      }
+      setPreviewGate({ id: ds.gateId, kind: "rect", ...b });
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      const ds = dragRef.current;
+      if (!ds) return;
+      dragRef.current = null;
+      const clientDX = e.clientX - ds.startClientX;
+      const clientDY = e.clientY - ds.startClientY;
+      if (Math.abs(clientDX) < 3 && Math.abs(clientDY) < 3) {
+        setPreviewGate(null);
+        return;
+      }
+      const dataDX = (clientDX / ds.containerWidth) * ds.plotW / ds.plotAreaW * (ds.xMax - ds.xMin);
+      const dataDY = -(clientDY / ds.containerWidth) * ds.plotH / ds.plotAreaH * (ds.yMax - ds.yMin);
+      setPreviewGate(null);
+
+      if (ds.gateType === "polygon" && ds.origVertices) {
+        // PATCH polygon with translated vertices
+        const newVerts = ds.origVertices.map(([vx, vy]) => [vx + dataDX, vy + dataDY]);
+        void (async () => {
+          try {
+            await patchJson(`${API_BASE}/api/gates/${encodeURIComponent(ds.gateId)}`, { vertices: newVerts });
+            undoStackRef.current = [...undoStackRef.current.slice(-49), {
+              type: "update", gateId: ds.gateId,
+              old: ds.origBounds, new: ds.origBounds, // bounds-undo not supported for poly; treated as no-op
+            }];
+            redoStackRef.current = [];
+            if (file) await fetchGateTree(file.id);
+          } catch (err) {
+            setGateMessage(`Failed to move gate: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        })();
+        return;
+      }
+
+      // Rectangle: compute final normalised bounds and PATCH
+      const o = ds.origBounds;
+      let nb: BoundsSnapshot;
+      if (ds.mode === "move") {
+        nb = { x_min: o.x_min + dataDX, y_min: o.y_min + dataDY, x_max: o.x_max + dataDX, y_max: o.y_max + dataDY };
+      } else if (ds.mode === "resize-nw") {
+        nb = { ...o, x_min: o.x_min + dataDX, y_max: o.y_max + dataDY };
+      } else if (ds.mode === "resize-ne") {
+        nb = { ...o, x_max: o.x_max + dataDX, y_max: o.y_max + dataDY };
+      } else if (ds.mode === "resize-sw") {
+        nb = { ...o, x_min: o.x_min + dataDX, y_min: o.y_min + dataDY };
+      } else {
+        nb = { ...o, x_max: o.x_max + dataDX, y_min: o.y_min + dataDY };
+      }
+      const finalBounds: BoundsSnapshot = {
+        x_min: Math.min(nb.x_min, nb.x_max),
+        y_min: Math.min(nb.y_min, nb.y_max),
+        x_max: Math.max(nb.x_min, nb.x_max),
+        y_max: Math.max(nb.y_min, nb.y_max),
+      };
+      void (async () => {
+        try {
+          await patchJson(`${API_BASE}/api/gates/${encodeURIComponent(ds.gateId)}`, finalBounds);
+          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "update", gateId: ds.gateId, old: ds.origBounds, new: finalBounds }];
+          redoStackRef.current = [];
+          if (file) await fetchGateTree(file.id);
+        } catch (err) {
+          setGateMessage(`Failed to move gate: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [file, fetchGateTree]);
 
   const plotContainerRef = React.useRef<HTMLDivElement>(null);
   const [plotSize, setPlotSize] = React.useState({ w: 480, h: 360 });
@@ -1866,11 +2110,14 @@ export const App: React.FC = () => {
             <>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: "0.35rem" }}>
-                  {[
-                    { id: "rectangle", label: "Rect" },
-                    { id: "polygon", label: "Poly" },
-                    { id: "quadrant", label: "Quad" },
-                  ].map((tool) => {
+                  {(plotMode !== "histogram"
+                    ? [
+                        { id: "rectangle", label: "Rect" },
+                        { id: "polygon", label: "Poly" },
+                        { id: "quadrant", label: "Quad" },
+                      ]
+                    : [{ id: "interval", label: "Interval" }]
+                  ).map((tool) => {
                     const active = gateTool === tool.id;
                     return (
                       <button
@@ -1881,8 +2128,10 @@ export const App: React.FC = () => {
                           setGateTool(next);
                           setDrawMode(next !== null);
                           setPendingGate(null);
+                          setPendingInterval(null);
                           setDrawingRect(null);
                           setDrawingPolygon(null);
+                          setDrawingInterval(null);
                           setGateNameError(null);
                         }}
                         style={{
@@ -1932,7 +2181,7 @@ export const App: React.FC = () => {
                         const name = pendingGate.gateName.trim() || "Gate";
                         setGateNameError(null);
                         try {
-                          await postJson(`${API_BASE}/api/gates`, {
+                          const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
                             file_id: file.id,
                             name,
                             x_channel: xChannel,
@@ -1944,6 +2193,8 @@ export const App: React.FC = () => {
                             arcsinh_cofactor: 150,
                             params: { type: "rectangle", x_min: xMin, y_min: yMin, x_max: xMax, y_max: yMax },
                           });
+                          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
+                          redoStackRef.current = [];
                           await fetchGateTree(file.id);
                           setPendingGate(null);
                         } catch (e) {
@@ -1991,6 +2242,72 @@ export const App: React.FC = () => {
                     </button>
                   </div>
                 )}
+                {gateTool === "interval" && pendingInterval && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={pendingInterval.gateName}
+                      onChange={(e) => {
+                        setGateNameError(null);
+                        setPendingInterval((p) => (p ? { ...p, gateName: e.target.value } : null));
+                      }}
+                      placeholder="Interval gate name"
+                      autoFocus
+                      style={{
+                        padding: "0.25rem 0.5rem",
+                        width: "150px",
+                        borderRadius: "0.35rem",
+                        border: "1px solid rgba(148,163,184,0.6)",
+                        background: "rgba(15,23,42,0.8)",
+                        color: "white",
+                        fontSize: "0.8rem",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!file || !pendingInterval) return;
+                        const name = pendingInterval.gateName.trim() || "Interval gate";
+                        setGateNameError(null);
+                        try {
+                          const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
+                            file_id: file.id,
+                            name,
+                            x_channel: xChannel,
+                            y_channel: "",
+                            parent_gate_id: activeGateId,
+                            transform_x: transformX,
+                            transform_y: "linear",
+                            arcsinh_cofactor: 150,
+                            params: { type: "interval", x_min: pendingInterval.xMin, x_max: pendingInterval.xMax },
+                          });
+                          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
+                          redoStackRef.current = [];
+                          await fetchGateTree(file.id);
+                          setPendingInterval(null);
+                          setDrawMode(false);
+                          setGateTool(null);
+                        } catch (e) {
+                          if (e instanceof Error && e.message.startsWith("HTTP 409")) {
+                            setGateNameError("Name already in use");
+                          } else {
+                            setGateNameError(e instanceof Error ? e.message : "Failed to create gate");
+                          }
+                        }
+                      }}
+                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "none", fontSize: "0.8rem", cursor: "pointer", background: "#22c55e", color: "white" }}
+                    >
+                      Create interval gate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPendingInterval(null); setDrawMode(true); }}
+                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "1px solid #6b7280", fontSize: "0.8rem", cursor: "pointer", background: "transparent", color: "#9ca3af" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
                 {gateTool === "polygon" && drawingPolygon && drawingPolygon.points.length >= 3 && (
                   <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
                     <input
@@ -2025,7 +2342,7 @@ export const App: React.FC = () => {
                         ]);
                         setGateNameError(null);
                         try {
-                          await postJson(`${API_BASE}/api/gates`, {
+                          const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
                             file_id: file.id,
                             name,
                             x_channel: xChannel,
@@ -2037,6 +2354,8 @@ export const App: React.FC = () => {
                             arcsinh_cofactor: 150,
                             params: { type: "polygon", vertices: rawVerts },
                           });
+                          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
+                          redoStackRef.current = [];
                           await fetchGateTree(file.id);
                           setDrawingPolygon(null);
                           setPendingGate(null);
@@ -2207,6 +2526,22 @@ export const App: React.FC = () => {
                   </button>
                   <button
                     type="button"
+                    onClick={() => { setPlotMode("histogram"); setDrawMode(false); setGateTool(null); }}
+                    style={{
+                      padding: "0.1rem 0.45rem",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(148,163,184,0.6)",
+                      backgroundColor:
+                        plotMode === "histogram" ? "rgba(148,163,184,0.3)" : "transparent",
+                      color: "#e5e7eb",
+                      fontSize: "0.7rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Histogram
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setPlotBgMode((b) => (b === "dark" ? "white" : "dark"))}
                     style={{
                       padding: "0.1rem 0.45rem",
@@ -2364,7 +2699,9 @@ export const App: React.FC = () => {
                   const x = Math.max(0, Math.min(1, (localX - rLeft) / rPlotW));
                   const yDown = Math.max(0, Math.min(1, (localY - rTop) / rPlotH));
                   const y = 1 - yDown;
-                  if (gateTool === "rectangle") {
+                  if (gateTool === "interval") {
+                    setDrawingInterval({ startX: x, endX: x });
+                  } else if (gateTool === "rectangle") {
                     setDrawingRect({ startX: x, startY: y, endX: x, endY: y });
                   } else if (gateTool === "polygon") {
                     setDrawingPolygon((prev) => ({
@@ -2376,7 +2713,7 @@ export const App: React.FC = () => {
                     const xRaw = r.xMin + (r.xMax - r.xMin) * x;
                     const yRaw = r.yMin + (r.yMax - r.yMin) * y;
                     const makeGate = async (name: string, xMin: number, xMax: number, yMin: number, yMax: number) => {
-                      await postJson(`${API_BASE}/api/gates`, {
+                      const c = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
                         file_id: file.id,
                         name,
                         x_channel: xChannel,
@@ -2388,6 +2725,7 @@ export const App: React.FC = () => {
                         arcsinh_cofactor: 150,
                         params: { type: "rectangle", x_min: xMin, y_min: yMin, x_max: xMax, y_max: yMax },
                       });
+                      return c.id;
                     };
                     void (async () => {
                       try {
@@ -2410,7 +2748,10 @@ export const App: React.FC = () => {
                           }
                         }
                         if (!picked) suffix = ` (${Date.now()})`;
-                        for (const fn of quad(suffix)) await fn();
+                        const createdIds: string[] = [];
+                        for (const fn of quad(suffix)) createdIds.push(await fn());
+                        undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create_batch", gateIds: createdIds }];
+                        redoStackRef.current = [];
                         await fetchGateTree(file.id);
                       } catch (e) {
                         setGateNameError(e instanceof Error ? e.message : "Quadrant gate creation failed");
@@ -2421,6 +2762,18 @@ export const App: React.FC = () => {
                   }
                 }}
                 onMouseMove={(e) => {
+                  if (gateTool === "interval" && drawingInterval) {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    const localX = e.clientX - rect.left;
+                    const m = plotScaledMargins(plotW, plotH);
+                    const sx = rect.width / plotW;
+                    const rLeft = m.ml * sx;
+                    const rRight = m.mr * sx;
+                    const rPlotW = Math.max(1e-6, rect.width - rLeft - rRight);
+                    const x = Math.max(0, Math.min(1, (localX - rLeft) / rPlotW));
+                    setDrawingInterval((d) => (d ? { ...d, endX: x } : null));
+                    return;
+                  }
                   if (!drawingRect) return;
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                   const localX = e.clientX - rect.left;
@@ -2440,6 +2793,19 @@ export const App: React.FC = () => {
                   setDrawingRect((r) => (r ? { ...r, endX: x, endY: y } : null));
                 }}
                 onMouseUp={() => {
+                  if (gateTool === "interval" && drawingInterval && transformedRange) {
+                    const nxMin = Math.min(drawingInterval.startX, drawingInterval.endX);
+                    const nxMax = Math.max(drawingInterval.startX, drawingInterval.endX);
+                    if (nxMax - nxMin > 0.01) {
+                      const r = transformedRange;
+                      const xMin_ = r.xMin + (r.xMax - r.xMin) * nxMin;
+                      const xMax_ = r.xMin + (r.xMax - r.xMin) * nxMax;
+                      setPendingInterval({ xMin: xMin_, xMax: xMax_, gateName: "" });
+                    }
+                    setDrawingInterval(null);
+                    setDrawMode(false);
+                    return;
+                  }
                   if (gateTool === "rectangle" && drawingRect) {
                     const nxMin = Math.min(drawingRect.startX, drawingRect.endX);
                     const nxMax = Math.max(drawingRect.startX, drawingRect.endX);
@@ -2460,7 +2826,7 @@ export const App: React.FC = () => {
                 display: "block",
                 width: "100%",
                 height: "100%",
-                pointerEvents: "none",
+                pointerEvents: drawMode ? "none" : "auto",
                 position: "relative",
                 zIndex: 1,
               }}
@@ -2474,8 +2840,9 @@ export const App: React.FC = () => {
                 fill={plotInnerFill}
                 stroke={plotInnerStroke}
                 strokeWidth={1}
+                style={{ pointerEvents: "none" }}
               />
-              {transformedRange && xChannel && yChannel && (
+              {transformedRange && xChannel && (
                 <>
                   <AxisTicks
                     axis="x"
@@ -2487,17 +2854,19 @@ export const App: React.FC = () => {
                     axisPixel={mt + plotAreaH}
                     fill={plotTickFill}
                   />
-                  <AxisTicks
-                    axis="y"
-                    min={transformedRange.yMin}
-                    max={transformedRange.yMax}
-                    transform={transformY}
-                    pixelStart={0}
-                    pixelEnd={plotAreaH}
-                    axisPixel={ml}
-                    plotTop={mt}
-                    fill={plotTickFill}
-                  />
+                  {plotMode !== "histogram" && yChannel && (
+                    <AxisTicks
+                      axis="y"
+                      min={transformedRange.yMin}
+                      max={transformedRange.yMax}
+                      transform={transformY}
+                      pixelStart={0}
+                      pixelEnd={plotAreaH}
+                      axisPixel={ml}
+                      plotTop={mt}
+                      fill={plotTickFill}
+                    />
+                  )}
                 </>
               )}
               {/* Axis labels */}
@@ -2514,7 +2883,18 @@ export const App: React.FC = () => {
                     xChannel}
                 </text>
               )}
-              {yChannel && (
+              {plotMode === "histogram" ? (
+                <text
+                  x={Math.max(10, ml - 8)}
+                  y={plotH / 2}
+                  textAnchor="end"
+                  transform={`rotate(-90 ${Math.max(10, ml - 8)} ${plotH / 2})`}
+                  fill={plotTickFill}
+                  fontSize="0.85rem"
+                >
+                  Count
+                </text>
+              ) : yChannel ? (
                 <text
                   x={Math.max(10, ml - 8)}
                   y={plotH / 2}
@@ -2527,7 +2907,7 @@ export const App: React.FC = () => {
                     channels.find((c) => c.name === yChannel)?.display_name ??
                     yChannel}
                 </text>
-              )}
+              ) : null}
               {activeGateId && points.length === 0 && (
                 <text
                   x={plotW / 2}
@@ -2539,79 +2919,131 @@ export const App: React.FC = () => {
                   0 events in this gate population
                 </text>
               )}
-              {/* ── Gate overlays (Sprint 4 / FE-4b): rect + polygon shapes with per-gate
-                   colors and labels (name · count · % of parent). visibleGates is
-                   already filtered to children of activeGateId on the current axes. ── */}
-              {transformedRange && (() => {
-                // Distinct color palette — cycles if > 8 gates visible at once.
-                const GATE_COLORS = [
-                  "#22c55e", // green
-                  "#3b82f6", // blue
-                  "#f59e0b", // amber
-                  "#ec4899", // pink
-                  "#8b5cf6", // violet
-                  "#06b6d4", // cyan
-                  "#f97316", // orange
-                  "#a3e635", // lime
-                ];
+              {/* ── Gate overlays: rect + polygon shapes (scatter/density mode only).
+                   Interval gates are rendered separately in histogram mode above. ── */}
+              {plotMode !== "histogram" && transformedRange && (() => {
+                const GATE_COLORS = ["#22c55e","#3b82f6","#f59e0b","#ec4899","#8b5cf6","#06b6d4","#f97316","#a3e635"];
                 const { xMin, xMax, yMin, yMax } = transformedRange;
                 const spanX = xMax - xMin || 1;
                 const spanY = yMax - yMin || 1;
-                // Normalise a data-space value → [0,1] clamped
                 const nx = (v: number) => Math.max(0, Math.min(1, (v - xMin) / spanX));
                 const ny = (v: number) => Math.max(0, Math.min(1, (v - yMin) / spanY));
-                // Data → SVG pixel
                 const toSvgX = (v: number) => ml + plotAreaW * nx(v);
                 const toSvgY = (v: number) => mt + plotAreaH * (1 - ny(v));
 
+                const startRectDrag = (e: React.MouseEvent, gateId: string, mode: DragState["mode"], origBounds: BoundsSnapshot) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const container = plotContainerRef.current;
+                  if (!container) return;
+                  const cRect = container.getBoundingClientRect();
+                  dragRef.current = {
+                    gateId, gateType: "rectangle", mode,
+                    startClientX: e.clientX, startClientY: e.clientY,
+                    origBounds,
+                    containerWidth: cRect.width,
+                    plotW, plotH, ml, mt, plotAreaW, plotAreaH,
+                    xMin, xMax, yMin, yMax,
+                  };
+                };
+
+                const startPolyDrag = (e: React.MouseEvent, gateId: string, origVertices: number[][], origBounds: BoundsSnapshot) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const container = plotContainerRef.current;
+                  if (!container) return;
+                  const cRect = container.getBoundingClientRect();
+                  dragRef.current = {
+                    gateId, gateType: "polygon", mode: "move",
+                    startClientX: e.clientX, startClientY: e.clientY,
+                    origBounds, origVertices,
+                    containerWidth: cRect.width,
+                    plotW, plotH, ml, mt, plotAreaW, plotAreaH,
+                    xMin, xMax, yMin, yMax,
+                  };
+                };
+
                 return visibleGates.map((g, idx) => {
                   const color = GATE_COLORS[idx % GATE_COLORS.length]!;
-                  const fillAlpha = color + "18"; // ~9% fill opacity
+                  const fillAlpha = color + "18";
+                  // Narrow previewGate to the correct variant for this gate
+                  const pvRaw = previewGate?.id === g.id ? previewGate : null;
+                  const pvRect = pvRaw?.kind === "rect" ? pvRaw : null;
+                  const pvPoly = pvRaw?.kind === "poly" ? pvRaw : null;
                   const pct = g.pct_of_parent ?? g.pct_of_total ?? 0;
                   const label = `${g.name}  ${g.count.toLocaleString()} (${pct.toFixed(1)}%)`;
+                  const canDrag = !drawMode;
 
                   if (g.type === "rectangle" &&
                       g.x_min != null && g.y_min != null &&
                       g.x_max != null && g.y_max != null) {
-                    const left   = ml + plotAreaW * Math.min(nx(g.x_min), nx(g.x_max));
-                    const top    = mt + plotAreaH * Math.min(1 - ny(g.y_min), 1 - ny(g.y_max));
-                    const rW     = plotAreaW * Math.abs(nx(g.x_max) - nx(g.x_min));
-                    const rH     = plotAreaH * Math.abs(ny(g.y_max) - ny(g.y_min));
-                    // Label: sit just above the top-left corner, clamped inside plot area
+                    const xMin_ = pvRect?.x_min ?? g.x_min;
+                    const yMin_ = pvRect?.y_min ?? g.y_min;
+                    const xMax_ = pvRect?.x_max ?? g.x_max;
+                    const yMax_ = pvRect?.y_max ?? g.y_max;
+                    const left = ml + plotAreaW * Math.min(nx(xMin_), nx(xMax_));
+                    const top  = mt + plotAreaH * Math.min(1 - ny(yMin_), 1 - ny(yMax_));
+                    const rW   = plotAreaW * Math.abs(nx(xMax_) - nx(xMin_));
+                    const rH   = plotAreaH * Math.abs(ny(yMax_) - ny(yMin_));
                     const labelX = Math.max(ml + 2, Math.min(ml + plotAreaW - 4, left + 3));
                     const labelY = Math.max(mt + 10, top - 4);
+                    const origBounds: BoundsSnapshot = { x_min: g.x_min, y_min: g.y_min, x_max: g.x_max, y_max: g.y_max };
+                    const handles: Array<{ sx: number; sy: number; mode: DragState["mode"]; cursor: string }> = [
+                      { sx: left,      sy: top,      mode: "resize-nw", cursor: "nw-resize" },
+                      { sx: left + rW, sy: top,      mode: "resize-ne", cursor: "ne-resize" },
+                      { sx: left,      sy: top + rH, mode: "resize-sw", cursor: "sw-resize" },
+                      { sx: left + rW, sy: top + rH, mode: "resize-se", cursor: "se-resize" },
+                    ];
                     return (
                       <g key={g.id}>
                         <rect x={left} y={top} width={rW} height={rH}
-                          fill={fillAlpha} stroke={color} strokeWidth={1.4} strokeDasharray="5 2" />
-                        {/* label background pill */}
+                          fill={fillAlpha} stroke={color} strokeWidth={1.4} strokeDasharray="5 2"
+                          style={{ cursor: canDrag ? (pvRect ? "grabbing" : "grab") : "default", pointerEvents: canDrag ? "all" : "none" }}
+                          onMouseDown={canDrag ? (e) => startRectDrag(e, g.id, "move", origBounds) : undefined}
+                        />
                         <rect x={labelX - 2} y={labelY - 9} width={label.length * 5.6 + 6} height={12}
-                          rx={3} fill="rgba(15,23,42,0.72)" />
+                          rx={3} fill="rgba(15,23,42,0.72)" style={{ pointerEvents: "none" }} />
                         <text x={labelX} y={labelY} fill={color} fontSize={9.5} fontWeight={600}
-                          dominantBaseline="auto" style={{ userSelect: "none" }}>
+                          dominantBaseline="auto" style={{ userSelect: "none", pointerEvents: "none" }}>
                           {label}
                         </text>
+                        {canDrag && handles.map((h) => (
+                          <rect key={h.mode}
+                            x={h.sx - 4} y={h.sy - 4} width={8} height={8}
+                            rx={2} fill={color} stroke="white" strokeWidth={1}
+                            style={{ cursor: h.cursor, pointerEvents: "all" }}
+                            onMouseDown={(e) => startRectDrag(e, g.id, h.mode, origBounds)}
+                          />
+                        ))}
                       </g>
                     );
                   }
 
                   if (g.type === "polygon" && g.vertices && g.vertices.length >= 3) {
-                    const svgPts = g.vertices.map(([xRaw, yRaw]) =>
-                      `${toSvgX(xRaw)},${toSvgY(yRaw)}`
-                    );
-                    // Centroid for label anchor
-                    const cx = g.vertices.reduce((s, [x]) => s + x, 0) / g.vertices.length;
-                    const cy = g.vertices.reduce((s, [, y]) => s + y, 0) / g.vertices.length;
+                    // Use preview vertices if a drag is in progress, otherwise use stored vertices
+                    const displayVerts = pvPoly?.vertices ?? g.vertices;
+                    const svgPts = displayVerts.map(([xRaw, yRaw]) => `${toSvgX(xRaw ?? 0)},${toSvgY(yRaw ?? 0)}`);
+                    const cx = displayVerts.reduce((s, v) => s + (v[0] ?? 0), 0) / displayVerts.length;
+                    const cy = displayVerts.reduce((s, v) => s + (v[1] ?? 0), 0) / displayVerts.length;
                     const lx = Math.max(ml + 2, Math.min(ml + plotAreaW - 4, toSvgX(cx) - label.length * 2.8));
                     const ly = Math.max(mt + 10, toSvgY(cy));
+                    // origBounds for poly: bounding box of vertices (used by undo, not for resize)
+                    const vxs = g.vertices.map((v) => v[0] ?? 0);
+                    const vys = g.vertices.map((v) => v[1] ?? 0);
+                    const polyOrigBounds: BoundsSnapshot = {
+                      x_min: Math.min(...vxs), y_min: Math.min(...vys),
+                      x_max: Math.max(...vxs), y_max: Math.max(...vys),
+                    };
                     return (
-                      <g key={g.id}>
-                        <polygon points={svgPts.join(" ")}
-                          fill={fillAlpha} stroke={color} strokeWidth={1.4} />
+                      <g key={g.id}
+                        style={{ cursor: canDrag ? (pvPoly ? "grabbing" : "grab") : "default", pointerEvents: canDrag ? "all" : "none" }}
+                        onMouseDown={canDrag ? (e) => startPolyDrag(e, g.id, g.vertices!, polyOrigBounds) : undefined}
+                      >
+                        <polygon points={svgPts.join(" ")} fill={fillAlpha} stroke={color} strokeWidth={1.4} />
                         <rect x={lx - 2} y={ly - 9} width={label.length * 5.6 + 6} height={12}
-                          rx={3} fill="rgba(15,23,42,0.72)" />
+                          rx={3} fill="rgba(15,23,42,0.72)" style={{ pointerEvents: "none" }} />
                         <text x={lx} y={ly} fill={color} fontSize={9.5} fontWeight={600}
-                          dominantBaseline="auto" style={{ userSelect: "none" }}>
+                          dominantBaseline="auto" style={{ userSelect: "none", pointerEvents: "none" }}>
                           {label}
                         </text>
                       </g>
@@ -2621,6 +3053,81 @@ export const App: React.FC = () => {
                   return null;
                 });
               })()}
+              {/* ── Histogram bars (histogram mode only) ── */}
+              {plotMode === "histogram" && histData && transformedRange && (() => {
+                const { binEdges, counts } = histData;
+                const maxCount = transformedRange.yMax || 1;
+                const { xMin: rXMin, xMax: rXMax } = transformedRange;
+                const spanX = rXMax - rXMin || 1;
+                const barFill = plotBgMode === "white" ? "rgba(59,130,246,0.75)" : "rgba(96,165,250,0.8)";
+                const barStroke = plotBgMode === "white" ? "#2563eb" : "#3b82f6";
+                return counts.map((count, i) => {
+                  const edge0 = binEdges[i] ?? rXMin;
+                  const edge1 = binEdges[i + 1] ?? rXMax;
+                  const x0 = ml + plotAreaW * Math.max(0, Math.min(1, (edge0 - rXMin) / spanX));
+                  const x1 = ml + plotAreaW * Math.max(0, Math.min(1, (edge1 - rXMin) / spanX));
+                  const barH = plotAreaH * (count / maxCount);
+                  if (x1 <= x0 || barH <= 0) return null;
+                  return (
+                    <rect
+                      key={i}
+                      x={x0}
+                      y={mt + plotAreaH - barH}
+                      width={Math.max(0.5, x1 - x0 - 0.5)}
+                      height={barH}
+                      fill={barFill}
+                      stroke={barStroke}
+                      strokeWidth={0.3}
+                      style={{ pointerEvents: "none" }}
+                    />
+                  );
+                });
+              })()}
+              {/* ── Interval gate overlays (histogram mode) ── */}
+              {plotMode === "histogram" && transformedRange && (() => {
+                const GATE_COLORS = ["#22c55e","#3b82f6","#f59e0b","#ec4899","#8b5cf6","#06b6d4","#f97316","#a3e635"];
+                const { xMin: rXMin, xMax: rXMax } = transformedRange;
+                const spanX = rXMax - rXMin || 1;
+                const toX = (v: number) => ml + plotAreaW * Math.max(0, Math.min(1, (v - rXMin) / spanX));
+                // Show interval gates matching x_channel and parent
+                const intervalGates = gateList.filter(
+                  (g) => g.type === "interval" && g.x_channel === xChannel && g.parent_gate_id === activeGateId,
+                );
+                return intervalGates.map((g, idx) => {
+                  if (g.x_min == null || g.x_max == null) return null;
+                  const color = GATE_COLORS[idx % GATE_COLORS.length]!;
+                  const svgX0 = toX(g.x_min);
+                  const svgX1 = toX(g.x_max);
+                  const bw = Math.max(1, svgX1 - svgX0);
+                  const pct = g.pct_of_parent ?? g.pct_of_total ?? 0;
+                  const label = `${g.name} ${g.count.toLocaleString()} (${pct.toFixed(1)}%)`;
+                  return (
+                    <g key={g.id} style={{ pointerEvents: "none" }}>
+                      <rect x={svgX0} y={mt} width={bw} height={plotAreaH}
+                        fill={color + "28"} stroke={color} strokeWidth={1.4} strokeDasharray="5 2" />
+                      <rect x={svgX0 + 2} y={mt + 4} width={label.length * 5.4 + 6} height={12} rx={3}
+                        fill="rgba(15,23,42,0.75)" />
+                      <text x={svgX0 + 5} y={mt + 13} fill={color} fontSize={9.5} fontWeight={600}
+                        dominantBaseline="auto" style={{ userSelect: "none" }}>
+                        {label}
+                      </text>
+                    </g>
+                  );
+                });
+              })()}
+              {/* ── Interval drawing preview ── */}
+              {drawingInterval && transformedRange && (
+                <rect
+                  x={ml + plotAreaW * Math.min(drawingInterval.startX, drawingInterval.endX)}
+                  y={mt}
+                  width={plotAreaW * Math.abs(drawingInterval.endX - drawingInterval.startX)}
+                  height={plotAreaH}
+                  fill="rgba(74,222,128,0.15)"
+                  stroke="#4ade80"
+                  strokeWidth={1.5}
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
               {drawingPolygon && drawingPolygon.points.length > 1 && (
                 <polyline
                   points={drawingPolygon.points

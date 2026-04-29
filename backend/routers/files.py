@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from models.file_models import (
   FileDensityResponse,
   FileEventsResponse,
+  FileHistogramResponse,
   FileLoadRequest,
   FileLoadResponse,
   FileMetadata,
@@ -323,6 +324,96 @@ async def get_density(
     bins_x=bins_x,
     bins_y=bins_y,
     counts=counts_list,
+  )
+
+
+@router.get("/{file_id}/histogram", response_model=FileHistogramResponse)
+async def get_histogram(
+  file_id: str,
+  channel: str = Query(..., description="Channel name ($PnN)"),
+  bins: int = Query(256, ge=16, le=1024, description="Number of histogram bins"),
+  transform: Optional[str] = Query(None, description="linear | log | arcsinh | logicle"),
+  arcsinh_cofactor: float = Query(150.0, description="Cofactor for arcsinh transform"),
+  logicle_t: Optional[float] = Query(None, description="Logicle T. Defaults to $PnR."),
+  logicle_w: Optional[float] = Query(None, description="Logicle W. Default 0.5."),
+  logicle_m: Optional[float] = Query(None, description="Logicle M. Default 4.5."),
+  logicle_a: Optional[float] = Query(None, description="Logicle A. Default 0.0."),
+  gate_id: Optional[str] = Query(None, description="Restrict to events inside this gate (optional)"),
+  max_events: int = Query(500_000, ge=1, le=2_000_000),
+) -> FileHistogramResponse:
+  """Return a 1-D histogram for a single channel in transformed space.
+
+  Optionally restricted to a gate population via ``gate_id``.
+  ``bin_edges`` has n+1 values; ``counts`` has n values.
+  """
+  try:
+    metadata = storage.get_file_metadata(file_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+  channel_by_name = {ch.name: ch for ch in metadata.channels}
+  ch_meta = channel_by_name.get(channel)
+  if ch_meta is None:
+    raise HTTPException(status_code=400, detail=f"Channel {channel!r} not found")
+
+  # Resolve events (full or gate-masked)
+  try:
+    if gate_id:
+      from services.gates import _store, _get_mask  # pylint: disable=import-outside-toplevel
+      record = _store.gates_by_id.get(gate_id)
+      if record is None:
+        raise HTTPException(status_code=404, detail=f"Gate {gate_id!r} not found")
+      all_events = storage.get_file_events(file_id)
+      mask = _get_mask(record)
+      events_raw = all_events[mask]
+    else:
+      events_raw = storage.get_file_events_downsampled(file_id, max_events=max_events)
+  except HTTPException:
+    raise
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"histogram events error: {exc!r}") from exc
+
+  col_idx = ch_meta.index - 1
+  col = events_raw[:, col_idx].astype(float)
+
+  # Resolve transform
+  tx = transform if transform and transform in transform_service.TRANSFORMS else "linear"
+  base_kwargs: dict = {"arcsinh_cofactor": arcsinh_cofactor}
+  if tx == "logicle":
+    t = _resolve_logicle_t(logicle_t, ch_meta.range)
+    kw = {**base_kwargs, **_build_logicle_kwargs(t, logicle_w, logicle_m, logicle_a)}
+  else:
+    kw = base_kwargs
+  col = transform_service.apply_transform(col, tx, **kw)
+
+  # Filter out NaN/inf from transform
+  finite = col[np.isfinite(col)]
+  if finite.size == 0:
+    return FileHistogramResponse(
+      file_id=file_id, channel=channel, transform=tx,
+      bin_edges=[0.0, 1.0], counts=[0],
+      x_min=0.0, x_max=1.0,
+    )
+
+  x_min = float(np.min(finite))
+  x_max = float(np.max(finite))
+  if x_max == x_min:
+    delta = max(1.0, abs(x_min) * 0.01)
+    x_min -= delta
+    x_max += delta
+
+  counts_arr, edges = np.histogram(finite, bins=bins, range=(x_min, x_max))
+
+  return FileHistogramResponse(
+    file_id=file_id,
+    channel=channel,
+    transform=tx,
+    bin_edges=[float(e) for e in edges],
+    counts=[int(c) for c in counts_arr],
+    x_min=x_min,
+    x_max=x_max,
   )
 
 

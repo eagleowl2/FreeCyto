@@ -998,3 +998,94 @@ class TestReproducibility:
                 f"Gate {gate_def['name']!r}: got {resp.count}, expected {gate_def['expected_count']}. "
                 "Check full-event evaluation (S-1) and channel index mapping."
             )
+
+
+# ---------------------------------------------------------------------------
+# H: Gate update (PATCH) tests
+# ---------------------------------------------------------------------------
+
+class TestGateUpdate:
+    """
+    Verify PATCH /api/gates/{gate_id} semantics: geometry updates, cache
+    invalidation, descendant re-evaluation, and error handling.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        gates_service.reset_gate_store()
+        yield
+        gates_service.reset_gate_store()
+
+    def test_update_rect_bounds_changes_count(self):
+        """H-UPDATE-1: updating bounds produces a new count matching numpy reference."""
+        fid = _make_synthetic_file(n_events=1000, channel_names=["CH1", "CH2", "CH3", "CH4"])
+        resp = gates_service.create_gate(_rect_request(fid, "G", "CH1", "CH2", 400, 400, 600, 600))
+        count_narrow = resp.count
+
+        from models.gate_models import GateUpdateRequest
+        updated = gates_service.update_gate(resp.id, GateUpdateRequest(x_min=200, y_min=200, x_max=800, y_max=800))
+        count_wide = updated.count
+
+        assert count_wide >= count_narrow, (
+            f"Wider gate should capture at least as many events: narrow={count_narrow} wide={count_wide}"
+        )
+        assert count_wide > 0, "Wide gate should capture some events in a 1000-event uniform file"
+
+    def test_update_preserves_gate_id_and_meta(self):
+        """H-UPDATE-2: gate id, name, and channels are unchanged after update."""
+        fid = _make_synthetic_file(n_events=1000, channel_names=["CH1", "CH2", "CH3", "CH4"])
+        resp = gates_service.create_gate(_rect_request(fid, "Stable", "CH1", "CH2", 300, 300, 700, 700))
+
+        from models.gate_models import GateUpdateRequest
+        updated = gates_service.update_gate(resp.id, GateUpdateRequest(x_min=100, x_max=900))
+        assert updated.id == resp.id
+        assert updated.name == "Stable"
+        assert updated.x_channel == "CH1"
+        assert updated.y_channel == "CH2"
+
+    def test_update_invalidates_descendant_cache(self):
+        """H-UPDATE-3: updating a parent gate re-evaluates child gate counts."""
+        fid = _make_synthetic_file(n_events=2000, channel_names=["CH1", "CH2", "CH3", "CH4"])
+        parent = gates_service.create_gate(_rect_request(fid, "Parent", "CH1", "CH2", 200, 200, 800, 800))
+        child = gates_service.create_gate(_rect_request(fid, "Child", "CH1", "CH2", 300, 300, 700, 700, parent=parent.id))
+        child_count_before = child.count
+
+        from models.gate_models import GateUpdateRequest
+        # Shrink parent to exclude all events in child region
+        gates_service.update_gate(parent.id, GateUpdateRequest(x_min=850, y_min=850, x_max=950, y_max=950))
+
+        tree = gates_service.get_gate_tree(fid)
+        assert len(tree) == 1
+        reloaded_child = tree[0].children[0]
+        assert reloaded_child.count < child_count_before, (
+            f"Child count should drop after parent shrinks: before={child_count_before} after={reloaded_child.count}"
+        )
+
+    def test_update_unknown_gate_raises_key_error(self):
+        """H-UPDATE-4: updating a non-existent gate raises KeyError."""
+        from models.gate_models import GateUpdateRequest
+        with pytest.raises(KeyError, match="not found"):
+            gates_service.update_gate("nonexistent-id", GateUpdateRequest(x_min=0))
+
+    def test_update_count_matches_numpy_reference(self):
+        """H-UPDATE-5: updated count matches direct numpy evaluation of new bounds."""
+        import numpy as np
+        rng = np.random.default_rng(77)
+        events = rng.uniform(0, 1000, size=(5000, 2)).astype(np.float32)
+        from models.file_models import ChannelMetadata, FileMetadata
+        channels = [ChannelMetadata(name=f"CH{i+1}", index=i+1, stain=None, range=1024.0, amplification=None, display_name=f"CH{i+1}") for i in range(2)]
+        meta = FileMetadata(id="upd_ref", path="/upd.fcs", sample_name="upd", event_count=5000, channels=channels)
+        import services.storage as _st
+        _st.register_file(meta, events)
+        gates_service.reset_gate_store()
+
+        resp = gates_service.create_gate(_rect_request("upd_ref", "G", "CH1", "CH2", 100, 100, 500, 500))
+        from models.gate_models import GateUpdateRequest
+        new_x_min, new_y_min, new_x_max, new_y_max = 200.0, 300.0, 800.0, 700.0
+        updated = gates_service.update_gate(resp.id, GateUpdateRequest(x_min=new_x_min, y_min=new_y_min, x_max=new_x_max, y_max=new_y_max))
+
+        expected = int(np.sum(
+            (events[:, 0] >= new_x_min) & (events[:, 0] <= new_x_max) &
+            (events[:, 1] >= new_y_min) & (events[:, 1] <= new_y_max)
+        ))
+        assert updated.count == expected, f"Count mismatch: API={updated.count}, numpy={expected}"

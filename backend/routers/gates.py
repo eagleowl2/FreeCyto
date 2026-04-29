@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Query
 
 from models.file_models import FileDensityResponse, FileEventsResponse
-from models.gate_models import GateCreateRequest, GateResponse, GateStatsResponse
+from models.gate_models import GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest
 from services import gates as gates_service
 from services.gates import GateNameExistsError
 
@@ -176,6 +176,19 @@ async def get_gate_stats(gate_id: str) -> GateStatsResponse:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
   except Exception as exc:
     raise HTTPException(status_code=500, detail=f"stats error: {exc!r}") from exc
+
+
+@router.patch("/{gate_id}", response_model=GateResponse)
+async def update_gate(gate_id: str, body: GateUpdateRequest) -> GateResponse:
+  """Update gate geometry (bounds for rectangle, vertices for polygon). Coordinates in transformed space."""
+  try:
+    resp = gates_service.update_gate(gate_id, body)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  _snapshot_session_async()
+  return resp
 
 
 @router.delete("/{gate_id}")

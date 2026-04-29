@@ -806,12 +806,26 @@ def delete_gate(gate_id: str) -> list[str]:
 
 
 def update_gate(gate_id: str, body: GateUpdateRequest) -> GateResponse:
-  """Update gate geometry in-place; invalidates mask/stats for the gate and all descendants."""
+  """Update gate geometry in-place; invalidates mask/stats for the gate and all descendants.
+  If body.name is provided the gate is also renamed (uniqueness enforced within the file).
+  Name changes do not affect gate geometry or cached masks."""
   record = _store.gates_by_id.get(gate_id)
   if record is None:
     raise KeyError(f"Gate {gate_id!r} not found")
   if record.file_id in _store.suspended_files:
     raise KeyError(f"File for gate {gate_id!r} is not currently loaded")
+  # O: gate rename — apply before geometry changes so errors surface early.
+  if body.name is not None:
+    new_name = body.name.strip()
+    if not new_name:
+      raise ValueError("Gate name must not be empty or blank")
+    if new_name != record.name:
+      for gid in _all_gate_ids_for_file(record.file_id):
+        r = _store.gates_by_id.get(gid)
+        if r is not None and r.id != gate_id and r.name == new_name:
+          raise GateNameExistsError(new_name, record.file_id)
+      record.name = new_name
+      # Name change does not affect geometry or mask — no cache invalidation needed.
   if record.type == "rectangle":
     if body.x_min is not None:
       record.x_min = body.x_min

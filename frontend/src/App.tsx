@@ -255,6 +255,9 @@ export const App: React.FC = () => {
   const [histOverlayIds, setHistOverlayIds] = React.useState<string[]>([]);
   const [histOverlayData, setHistOverlayData] = React.useState<Record<string, HistogramData>>({});
 
+  // O: density contour lines toggle
+  const [showContours, setShowContours] = React.useState(false);
+
   /** Monotonic id for plot data fetches; stale responses must not overwrite React state (see FRONTEND_REVIEW #1). */
   const plotRequestGenerationRef = React.useRef(0);
   /** N: ref to the main plot SVG for PNG export. */
@@ -791,6 +794,16 @@ export const App: React.FC = () => {
       setGateTreeLoading(false);
     }
   }, []);
+
+  // O: rename a gate in-place (PATCH name only); re-fetches tree on success.
+  const handleRenameGate = React.useCallback(
+    async (gateId: string, newName: string) => {
+      if (!file) return;
+      await patchJson<unknown>(`${API_BASE}/api/gates/${encodeURIComponent(gateId)}`, { name: newName });
+      await fetchGateTree(file.id);
+    },
+    [file, fetchGateTree],
+  );
 
   const loadWorkspaceFromParsedBody = React.useCallback(
     async (body: unknown) => {
@@ -3541,6 +3554,22 @@ export const App: React.FC = () => {
                       >
                         {densityDisplayScale === "log" ? "Density: log" : "Density: linear"}
                       </button>
+                      {/* O: density contour lines toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setShowContours((v) => !v)}
+                        style={{
+                          padding: "0.1rem 0.4rem",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(148,163,184,0.6)",
+                          fontSize: "0.65rem",
+                          cursor: "pointer",
+                          backgroundColor: showContours ? "rgba(148,163,184,0.35)" : "transparent",
+                          color: "#e5e7eb",
+                        }}
+                      >
+                        Contours
+                      </button>
                     </>
                   )}
                 </div>
@@ -3903,7 +3932,143 @@ export const App: React.FC = () => {
                   };
                 };
 
-                return visibleGates.map((g, idx) => {
+                // ── O: density contour lines (marching squares) ──────────────────
+                const contourPaths: React.ReactNode[] = [];
+                if (showContours && density && plotMode === "density") {
+                  // Smooth the grid with a box blur (3×3, 3 passes ≈ Gaussian)
+                  const smoothGrid = (g: number[][], passes: number): number[][] => {
+                    let src = g;
+                    for (let p = 0; p < passes; p++) {
+                      const nR = src.length;
+                      const nC = src[0]?.length ?? 0;
+                      const dst: number[][] = Array.from({ length: nR }, () => new Array(nC).fill(0) as number[]);
+                      for (let r = 0; r < nR; r++) {
+                        for (let c = 0; c < nC; c++) {
+                          let sum = 0, cnt = 0;
+                          for (let dr = -1; dr <= 1; dr++) {
+                            for (let dc = -1; dc <= 1; dc++) {
+                              const rr = r + dr, cc = c + dc;
+                              if (rr >= 0 && rr < nR && cc >= 0 && cc < nC) {
+                                sum += (src[rr]?.[cc] ?? 0); cnt++;
+                              }
+                            }
+                          }
+                          dst[r]![c] = sum / cnt;
+                        }
+                      }
+                      src = dst;
+                    }
+                    return src;
+                  };
+
+                  // Marching squares lookup: edges 0=top,1=right,2=bottom,3=left
+                  // Case bits: bit3=TL,bit2=TR,bit1=BR,bit0=BL (1=above level)
+                  const MS_TABLE: [number, number][][] = [
+                    [],               // 0
+                    [[3, 2]],         // 1
+                    [[2, 1]],         // 2
+                    [[3, 1]],         // 3
+                    [[0, 1]],         // 4
+                    [[3, 0], [2, 1]], // 5 saddle
+                    [[0, 2]],         // 6
+                    [[0, 3]],         // 7
+                    [[0, 3]],         // 8
+                    [[0, 2]],         // 9
+                    [[0, 1], [3, 2]], // 10 saddle
+                    [[0, 1]],         // 11
+                    [[3, 1]],         // 12
+                    [[2, 1]],         // 13
+                    [[3, 2]],         // 14
+                    [],               // 15
+                  ];
+
+                  const contoursForLevel = (
+                    grid: number[][], level: number,
+                    gxMin: number, gxMax: number, gyMin: number, gyMax: number,
+                  ): string => {
+                    const nR = grid.length;
+                    const nC = grid[0]?.length ?? 0;
+                    if (nR < 2 || nC < 2) return "";
+                    const dx = (gxMax - gxMin) / nC;
+                    const dy = (gyMax - gyMin) / nR;
+                    // grid[r][c]: r=0=yMin (bottom), r=nR-1=yMax (top)
+                    // colX(c) = gxMin + c*dx, rowY(r) = gyMin + r*dy
+                    const colX = (c: number) => gxMin + c * dx;
+                    const rowY = (r: number) => gyMin + r * dy;
+                    const edgePt = (edge: number, r: number, c: number,
+                      tl: number, tr: number, br: number, bl: number): [number, number] => {
+                      const interp = (a: number, b: number) =>
+                        b === a ? 0.5 : Math.max(0, Math.min(1, (level - a) / (b - a)));
+                      if (edge === 0) { // top: TL→TR, y=rowY(r+1)
+                        const t = interp(tl, tr);
+                        return [toSvgX(colX(c) + t * dx), toSvgY(rowY(r + 1))];
+                      } else if (edge === 1) { // right: TR→BR, x=colX(c+1)
+                        const t = interp(tr, br);
+                        return [toSvgX(colX(c + 1)), toSvgY(rowY(r + 1) - t * dy)];
+                      } else if (edge === 2) { // bottom: BL→BR, y=rowY(r)
+                        const t = interp(bl, br);
+                        return [toSvgX(colX(c) + t * dx), toSvgY(rowY(r))];
+                      } else { // left: TL→BL, x=colX(c)
+                        const t = interp(tl, bl);
+                        return [toSvgX(colX(c)), toSvgY(rowY(r + 1) - t * dy)];
+                      }
+                    };
+                    const segs: string[] = [];
+                    for (let r = 0; r < nR - 1; r++) {
+                      for (let c = 0; c < nC - 1; c++) {
+                        // BL=grid[r][c], BR=grid[r][c+1], TL=grid[r+1][c], TR=grid[r+1][c+1]
+                        const bl = grid[r]?.[c] ?? 0;
+                        const br = grid[r]?.[c + 1] ?? 0;
+                        const tl = grid[r + 1]?.[c] ?? 0;
+                        const tr = grid[r + 1]?.[c + 1] ?? 0;
+                        const caseIdx =
+                          ((tl >= level ? 1 : 0) << 3) |
+                          ((tr >= level ? 1 : 0) << 2) |
+                          ((br >= level ? 1 : 0) << 1) |
+                          ((bl >= level ? 1 : 0) << 0);
+                        const msSegs = MS_TABLE[caseIdx];
+                        if (!msSegs) continue;
+                        for (const [e0, e1] of msSegs) {
+                          const [x0, y0] = edgePt(e0, r, c, tl, tr, br, bl);
+                          const [x1, y1] = edgePt(e1, r, c, tl, tr, br, bl);
+                          segs.push(`M${x0.toFixed(1)},${y0.toFixed(1)}L${x1.toFixed(1)},${y1.toFixed(1)}`);
+                        }
+                      }
+                    }
+                    return segs.join(" ");
+                  };
+
+                  const smoothed = smoothGrid(density.counts, 3);
+                  // Find max for level computation
+                  let maxCount = 0;
+                  for (const row of smoothed) for (const v of row) if (v > maxCount) maxCount = v;
+                  if (maxCount > 0) {
+                    const CONTOUR_LEVELS = [0.15, 0.30, 0.50, 0.70, 0.87];
+                    const CONTOUR_OPACITIES = [0.35, 0.45, 0.55, 0.65, 0.75];
+                    CONTOUR_LEVELS.forEach((frac, i) => {
+                      const level = frac * maxCount;
+                      const d = contoursForLevel(
+                        smoothed, level,
+                        density.xMin, density.xMax, density.yMin, density.yMax,
+                      );
+                      if (d) {
+                        contourPaths.push(
+                          <path
+                            key={`contour-${i}`}
+                            d={d}
+                            fill="none"
+                            stroke="white"
+                            strokeWidth={0.9}
+                            strokeOpacity={CONTOUR_OPACITIES[i]}
+                            style={{ pointerEvents: "none" }}
+                          />,
+                        );
+                      }
+                    });
+                  }
+                }
+
+                const gateSvgElements = visibleGates.map((g, idx) => {
                   const color = GATE_COLORS[idx % GATE_COLORS.length]!;
                   const fillAlpha = color + "18";
                   // Narrow previewGate to the correct variant for this gate
@@ -4021,6 +4186,7 @@ export const App: React.FC = () => {
 
                   return null;
                 });
+                return <React.Fragment key="overlay">{contourPaths}{gateSvgElements}</React.Fragment>;
               })()}
               {/* ── Histogram bars (histogram mode only) ── */}
               {plotMode === "histogram" && histData && transformedRange && (() => {
@@ -4424,6 +4590,7 @@ export const App: React.FC = () => {
                     setDrawingPolygon(null);
                     setDrawingRect(null);
                   }}
+                  onRenameGate={handleRenameGate}
                 />
               </div>
             )}

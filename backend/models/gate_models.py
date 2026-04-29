@@ -140,7 +140,10 @@ class GateResponse(BaseModel):
 class GateUpdateRequest(BaseModel):
   """Update gate geometry in-place. Coordinates in transformed space (same as plot view).
   Provide x_min/y_min/x_max/y_max for rectangle gates, vertices for polygon gates,
-  center_x/center_y/radius_x/radius_y/angle for ellipse gates."""
+  center_x/center_y/radius_x/radius_y/angle for ellipse gates.
+  Provide name to rename a gate (must be non-empty and unique within the file)."""
+  # O: gate rename
+  name: str | None = Field(None, min_length=1, description="New display name (unique within file)")
   x_min: float | None = None
   y_min: float | None = None
   x_max: float | None = None

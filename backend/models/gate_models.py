@@ -43,8 +43,23 @@ class IntervalGateCreate(BaseModel):
   x_max: float
 
 
+class BooleanGateCreate(BaseModel):
+  """Boolean combination of existing gates (AND / OR / NOT).
+
+  ``expression`` uses gate names as operands and ``AND``, ``OR``, ``NOT`` as operators.
+  Parentheses are supported.  Gate names with special characters must be backtick-quoted.
+
+  Examples::
+      "Lymphocytes AND NOT dead_cells"
+      "`CD4+` OR `CD8+`"
+      "(Singlets AND Lymphocytes) AND NOT debris"
+  """
+  type: Literal["boolean"]
+  expression: str = Field(..., min_length=1, description="Boolean expression over gate names")
+
+
 GateParamsCreate = Annotated[
-  RectangleGateCreate | PolygonGateCreate | IntervalGateCreate,
+  RectangleGateCreate | PolygonGateCreate | IntervalGateCreate | BooleanGateCreate,
   Field(discriminator="type"),
 ]
 
@@ -53,8 +68,8 @@ class GateCreateRequest(BaseModel):
   """Create a gate. Coordinates in transformed space (same as plot view)."""
   file_id: str
   name: str = Field(..., min_length=1, description="Display name for the gate")
-  x_channel: str = Field(..., description="Channel name for X axis")
-  y_channel: str = Field("", description="Channel name for Y axis (empty string for interval gates)")
+  x_channel: str = Field("", description="Channel name for X axis (empty for boolean gates)")
+  y_channel: str = Field("", description="Channel name for Y axis (empty string for interval/boolean gates)")
   parent_gate_id: str | None = Field(None, description="Parent gate id for hierarchical gating")
   order: int = Field(-1, description="Order among siblings (0-based); -1 = append at end")
   transform_x: str = "linear"
@@ -90,6 +105,7 @@ class GateResponse(BaseModel):
   x_max: float | None = None
   y_max: float | None = None
   vertices: List[List[float]] | None = None
+  expression: str | None = Field(None, description="Boolean expression (type='boolean' only)")
   count: int = 0
   pct_total: float = 0.0
   pct_of_parent: float = 0.0

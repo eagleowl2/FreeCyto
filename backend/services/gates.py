@@ -7,13 +7,157 @@ when the backend process exits or when the file is evicted from the file cache."
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 import numpy as np
 
-from models.gate_models import ChannelStats, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate
+from models.gate_models import BooleanGateCreate, ChannelStats, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate
 from services import storage, transforms as transform_service
+
+
+# ---------------------------------------------------------------------------
+# Boolean expression parser
+# ---------------------------------------------------------------------------
+
+_BOOL_KEYWORDS = frozenset({"AND", "OR", "NOT"})
+
+
+def _tokenize_bool(expr: str) -> list[str]:
+  """Tokenize a boolean expression into keywords, parentheses, and gate names.
+
+  Gate names may be backtick-quoted (`` `CD4+` ``) to allow special characters.
+  Unquoted tokens that are not AND/OR/NOT/(/) are treated as gate names.
+  """
+  tokens: list[str] = []
+  i = 0
+  while i < len(expr):
+    if expr[i].isspace():
+      i += 1
+    elif expr[i] == "(":
+      tokens.append("(")
+      i += 1
+    elif expr[i] == ")":
+      tokens.append(")")
+      i += 1
+    elif expr[i] == "`":
+      # Backtick-quoted gate name
+      j = expr.find("`", i + 1)
+      if j == -1:
+        raise ValueError(f"Unclosed backtick in expression near position {i}")
+      tokens.append(expr[i + 1 : j])
+      i = j + 1
+    else:
+      m = re.match(r"[^\s()`]+", expr[i:])
+      word = m.group() if m else expr[i]
+      tokens.append(word)
+      i += len(word)
+  return tokens
+
+
+class _BoolParser:
+  """Recursive descent parser for boolean gate expressions.
+
+  Grammar (in order of increasing precedence)::
+
+      expr     := or_expr
+      or_expr  := and_expr ('OR' and_expr)*
+      and_expr := not_expr ('AND' not_expr)*
+      not_expr := 'NOT' not_expr | atom
+      atom     := '(' expr ')' | GATE_NAME
+  """
+
+  def __init__(self, tokens: list[str]) -> None:
+    self._tokens = tokens
+    self._pos = 0
+
+  def _peek(self) -> str | None:
+    return self._tokens[self._pos] if self._pos < len(self._tokens) else None
+
+  def _consume(self) -> str:
+    tok = self._tokens[self._pos]
+    self._pos += 1
+    return tok
+
+  def parse(self) -> Any:
+    node = self._or_expr()
+    if self._pos < len(self._tokens):
+      raise ValueError(f"Unexpected token in boolean expression: {self._tokens[self._pos]!r}")
+    return node
+
+  def _or_expr(self) -> Any:
+    left = self._and_expr()
+    while self._peek() == "OR":
+      self._consume()
+      right = self._and_expr()
+      left = ("OR", left, right)
+    return left
+
+  def _and_expr(self) -> Any:
+    left = self._not_expr()
+    while self._peek() == "AND":
+      self._consume()
+      right = self._not_expr()
+      left = ("AND", left, right)
+    return left
+
+  def _not_expr(self) -> Any:
+    if self._peek() == "NOT":
+      self._consume()
+      operand = self._not_expr()
+      return ("NOT", operand)
+    return self._atom()
+
+  def _atom(self) -> Any:
+    tok = self._peek()
+    if tok == "(":
+      self._consume()
+      node = self._or_expr()
+      if self._peek() != ")":
+        raise ValueError("Expected ')' in boolean expression")
+      self._consume()
+      return node
+    if tok is None or tok in _BOOL_KEYWORDS or tok in ("(", ")"):
+      raise ValueError(f"Expected gate name, got {tok!r}")
+    self._consume()
+    return ("GATE", tok)
+
+
+def _parse_bool_expr(expression: str) -> Any:
+  """Parse *expression* into an AST. Raises ValueError on syntax errors."""
+  tokens = _tokenize_bool(expression)
+  if not tokens:
+    raise ValueError("Empty boolean expression")
+  return _BoolParser(tokens).parse()
+
+
+def _collect_gate_names(ast: Any) -> list[str]:
+  """Return all gate names referenced in *ast* (may contain duplicates)."""
+  op = ast[0]
+  if op == "GATE":
+    return [ast[1]]
+  if op == "NOT":
+    return _collect_gate_names(ast[1])
+  return _collect_gate_names(ast[1]) + _collect_gate_names(ast[2])
+
+
+def _eval_bool_ast(ast: Any, masks: dict[str, np.ndarray]) -> np.ndarray:
+  """Evaluate a parsed boolean AST against a mapping of gate-name → mask array."""
+  op = ast[0]
+  if op == "GATE":
+    name = ast[1]
+    if name not in masks:
+      raise ValueError(f"Gate {name!r} not found in file for boolean evaluation")
+    return masks[name].copy()
+  if op == "NOT":
+    return ~_eval_bool_ast(ast[1], masks)
+  if op == "AND":
+    return _eval_bool_ast(ast[1], masks) & _eval_bool_ast(ast[2], masks)
+  if op == "OR":
+    return _eval_bool_ast(ast[1], masks) | _eval_bool_ast(ast[2], masks)
+  raise ValueError(f"Unknown AST operator: {op!r}")
 
 # Default logicle parameter values; also used as "not-yet-set" sentinels in auto-derivation.
 _DEFAULT_LOGICLE_T = 262144.0
@@ -93,6 +237,7 @@ class GateRecord:
   x_max: float | None = None
   y_max: float | None = None
   vertices: list[list[float]] | None = None
+  expression: str | None = None  # L: boolean gate expression
   _cached_count: int | None = field(default=None, repr=False)
   _cached_pct_total: float | None = field(default=None, repr=False)
   _cached_pct_of_parent: float | None = field(default=None, repr=False)
@@ -228,6 +373,15 @@ def _channel_name_to_index(file_id: str, channel_name: str) -> int:
   raise ValueError(f"Channel {channel_name!r} not found in file {file_id}")
 
 
+def _get_channel_values(file_id: str, channel_name: str, events: np.ndarray) -> np.ndarray:
+  """Return a 1-D float64 array for *channel_name*, which may be a derived parameter."""
+  from services import derived_params as dp_service  # lazy to avoid circular import
+  if dp_service.is_derived_param(file_id, channel_name):
+    return dp_service.get_derived_param_values(file_id, channel_name)
+  idx = _channel_name_to_index(file_id, channel_name)
+  return events[:, idx].astype(np.float64)
+
+
 def _transform_kwargs(record: GateRecord) -> dict:
   """Kwargs for apply_transform (arcsinh_cofactor, logicle_*)."""
   kwargs: dict = {"arcsinh_cofactor": record.arcsinh_cofactor}
@@ -270,11 +424,12 @@ def _get_mask(record: GateRecord, _visited: frozenset[str] | None = None) -> np.
     if parent and parent.file_id == record.file_id:
       parent_mask = _get_mask(parent, visited)
 
-  xi = _channel_name_to_index(record.file_id, record.x_channel)
+  # Boolean gates don't use channel data directly — skip channel lookup for them.
   kwargs = _transform_kwargs(record)
-  x = transform_service.apply_transform(
-    events[:, xi].astype(np.float64), record.transform_x, **kwargs
-  )
+  if record.type != "boolean":
+    x = transform_service.apply_transform(
+      _get_channel_values(record.file_id, record.x_channel, events), record.transform_x, **kwargs
+    )
 
   if record.type == "interval":
     # 1-D gate: only x_channel is needed; y_channel is empty string for interval gates.
@@ -282,11 +437,29 @@ def _get_mask(record: GateRecord, _visited: frozenset[str] | None = None) -> np.
       gate_mask = np.zeros(n_total, dtype=bool)
     else:
       gate_mask = (x >= record.x_min) & (x <= record.x_max)
+  elif record.type == "boolean":
+    # L: Boolean combination of other gates in the same file.
+    if not record.expression:
+      gate_mask = np.zeros(n_total, dtype=bool)
+    else:
+      ast = _parse_bool_expr(record.expression)
+      referenced_names = _collect_gate_names(ast)
+      # Build name→mask for all referenced gates, passing visited for cycle detection.
+      name_masks: dict[str, np.ndarray] = {}
+      for gid in topological_order(record.file_id):
+        ref = _store.gates_by_id.get(gid)
+        if ref is None or ref.name not in referenced_names:
+          continue
+        if ref.id in visited:
+          raise ValueError(
+            f"Boolean gate cycle detected: gate {record.name!r} references {ref.name!r}"
+          )
+        name_masks[ref.name] = _get_mask(ref, visited)
+      gate_mask = _eval_bool_ast(ast, name_masks)
   else:
     # 2-D gates (rectangle, polygon): also need y channel.
-    yi = _channel_name_to_index(record.file_id, record.y_channel)
     y = transform_service.apply_transform(
-      events[:, yi].astype(np.float64), record.transform_y, **kwargs
+      _get_channel_values(record.file_id, record.y_channel, events), record.transform_y, **kwargs
     )
     if record.type == "rectangle":
       if (
@@ -432,6 +605,10 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
     record = GateRecord(**_common, type="interval",
       x_min=p.x_min, x_max=p.x_max,
       y_min=None, y_max=None)
+  elif p.type == "boolean":
+    # Validate expression parses before committing
+    _parse_bool_expr(p.expression)
+    record = GateRecord(**_common, type="boolean", expression=p.expression)
   else:
     record = GateRecord(**_common, type="polygon", vertices=p.vertices)
 
@@ -497,6 +674,7 @@ def _record_to_response(record: GateRecord) -> GateResponse:
     x_max=record.x_max,
     y_max=record.y_max,
     vertices=record.vertices,
+    expression=record.expression,
     count=count,
     pct_total=round(pct_total, 2),
     pct_of_parent=round(pct_of_parent, 2),

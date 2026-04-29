@@ -39,6 +39,7 @@ class WorkspaceGateDef(BaseModel):
   x_max: float | None = None
   y_max: float | None = None
   vertices: List[List[float]] | None = None
+  expression: str | None = None  # for boolean gates
 
 
 class WorkspaceSave(BaseModel):

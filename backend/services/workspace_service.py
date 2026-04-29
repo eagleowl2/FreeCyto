@@ -59,6 +59,7 @@ def build_workspace_save(file_ids: List[str] | None = None) -> WorkspaceSave:
           x_max=gate.x_max,
           y_max=gate.y_max,
           vertices=gate.vertices,
+          expression=gate.expression,
         )
       )
 
@@ -74,7 +75,7 @@ def build_workspace_save(file_ids: List[str] | None = None) -> WorkspaceSave:
 def load_workspace(ws: WorkspaceSave) -> WorkspaceLoadResult:
   """Load workspace: load files by path, apply compensation, create gates. Returns summary and data for frontend."""
   from models.file_models import ChannelMetadata, FileMetadata
-  from models.gate_models import GateCreateRequest, PolygonGateCreate, RectangleGateCreate
+  from models.gate_models import BooleanGateCreate, GateCreateRequest, IntervalGateCreate, PolygonGateCreate, RectangleGateCreate
 
   if not ws.files:
     return WorkspaceLoadResult(files_loaded=0, compensation_applied=0, gates_created=0, gate_errors=[])
@@ -195,6 +196,10 @@ def load_workspace(ws: WorkspaceSave) -> WorkspaceLoadResult:
         )
       elif g.type == "polygon" and g.vertices and len(g.vertices) >= 3:
         params = PolygonGateCreate(type="polygon", vertices=g.vertices)
+      elif g.type == "interval" and g.x_min is not None and g.x_max is not None:
+        params = IntervalGateCreate(type="interval", x_min=g.x_min, x_max=g.x_max)
+      elif g.type == "boolean" and g.expression:
+        params = BooleanGateCreate(type="boolean", expression=g.expression)
       else:
         continue
       new_parent_id = id_map.get(g.parent_gate_id) if g.parent_gate_id else None

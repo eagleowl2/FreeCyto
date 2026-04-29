@@ -108,6 +108,8 @@ def apply_compensation(
 
   storage.set_compensation(file_id, corrected, s, cond)
   gates_service.invalidate_file_caches(file_id)
+  from services import derived_params as dp_service
+  dp_service.invalidate_file_caches(file_id)
   return cond
 
 

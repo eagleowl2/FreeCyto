@@ -189,7 +189,7 @@ export const App: React.FC = () => {
     nyMax: number;
     gateName: string;
   } | null>(null);
-  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "interval" | null>("rectangle");
+  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "interval" | "boolean" | null>("rectangle");
   const [drawMode, setDrawMode] = React.useState(false);
   const [drawingPolygon, setDrawingPolygon] = React.useState<{ points: { x: number; y: number }[] } | null>(null);
   const [fcsStatus, setFcsStatus] = React.useState<
@@ -232,6 +232,20 @@ export const App: React.FC = () => {
   const [tplName, setTplName] = React.useState("");
   const [tplStatus, setTplStatus] = React.useState<"idle" | "working" | "done" | "error">("idle");
   const [tplError, setTplError] = React.useState<string | null>(null);
+
+  // L: Boolean gates
+  const [boolGateName, setBoolGateName] = React.useState("");
+  const [boolExpression, setBoolExpression] = React.useState("");
+  const [boolGateError, setBoolGateError] = React.useState<string | null>(null);
+
+  // L: Derived parameters
+  type DerivedParamInfo = { id: string; file_id: string; name: string; expression: string };
+  const [derivedParams, setDerivedParams] = React.useState<DerivedParamInfo[]>([]);
+  const [dpPanelOpen, setDpPanelOpen] = React.useState(false);
+  const [dpName, setDpName] = React.useState("");
+  const [dpExpr, setDpExpr] = React.useState("");
+  const [dpError, setDpError] = React.useState<string | null>(null);
+  const [dpLoading, setDpLoading] = React.useState(false);
 
   /** Monotonic id for plot data fetches; stale responses must not overwrite React state (see FRONTEND_REVIEW #1). */
   const plotRequestGenerationRef = React.useRef(0);
@@ -520,6 +534,16 @@ export const App: React.FC = () => {
     setGroups((prev) => prev.filter((g) => g.id !== groupId));
     if (expandedGroupId === groupId) setExpandedGroupId(null);
   }, [expandedGroupId]);
+
+  /** L: Fetch and sync derived parameter list from backend. */
+  const fetchDerivedParams = React.useCallback(async (fileId: string) => {
+    try {
+      const data = await getJson<DerivedParamInfo[]>(`${API_BASE}/api/derived-params/${encodeURIComponent(fileId)}`);
+      setDerivedParams(data);
+    } catch {
+      setDerivedParams([]);
+    }
+  }, []);
 
   /** J-2: Fetch the parsed $SPILLOVER from the backend and populate the table editor. */
   const loadSpilloverFromFile = React.useCallback(async (fileId: string) => {
@@ -948,11 +972,16 @@ export const App: React.FC = () => {
   }, [activeGateId, statsExpanded]);
 
   React.useEffect(() => {
-    if (file?.id) void fetchGateTree(file.id);
-    else setGateTree([]);
+    if (file?.id) {
+      void fetchGateTree(file.id);
+      void fetchDerivedParams(file.id);
+    } else {
+      setGateTree([]);
+      setDerivedParams([]);
+    }
     setGateMessage(null);
     setActiveGateId(null);
-  }, [file?.id, fetchGateTree]);
+  }, [file?.id, fetchGateTree, fetchDerivedParams]);
 
   const clearGatesForTransformChange = React.useCallback(async () => {
     if (!file?.id) return;
@@ -2555,6 +2584,172 @@ export const App: React.FC = () => {
             </>
           )}
 
+          {/* L: Derived Parameters panel */}
+          {file && (
+            <div style={{ marginBottom: "0.8rem" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setDpPanelOpen((o) => !o);
+                  if (!dpPanelOpen && file) void fetchDerivedParams(file.id);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.35rem",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "0.3rem 0.5rem",
+                  borderRadius: "0.55rem",
+                  border: "1px solid rgba(167,139,250,0.35)",
+                  background: dpPanelOpen ? "rgba(139,92,246,0.12)" : "transparent",
+                  color: "#c4b5fd",
+                  fontSize: "0.78rem",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                <span>{dpPanelOpen ? "▾" : "▸"}</span>
+                <span>Derived Parameters</span>
+                {derivedParams.length > 0 && (
+                  <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "#6b7280" }}>
+                    {derivedParams.length}
+                  </span>
+                )}
+              </button>
+
+              {dpPanelOpen && (
+                <div
+                  style={{
+                    marginTop: "0.4rem",
+                    padding: "0.5rem",
+                    borderRadius: "0.65rem",
+                    background: "rgba(15,23,42,0.85)",
+                    border: "1px solid rgba(139,92,246,0.3)",
+                    fontSize: "0.78rem",
+                    color: "#9ca3af",
+                  }}
+                >
+                  {/* Create form */}
+                  <div style={{ marginBottom: "0.5rem" }}>
+                    <div style={{ fontWeight: 600, color: "#c4b5fd", marginBottom: "0.3rem" }}>New virtual channel</div>
+                    <input
+                      placeholder="Name (e.g. FSC_ratio)"
+                      value={dpName}
+                      onChange={(e) => { setDpName(e.target.value); setDpError(null); }}
+                      style={{
+                        width: "100%",
+                        marginBottom: "0.25rem",
+                        borderRadius: "0.4rem",
+                        border: "1px solid rgba(148,163,184,0.4)",
+                        background: "rgba(15,23,42,0.7)",
+                        color: "white",
+                        fontSize: "0.78rem",
+                        padding: "0.2rem 0.4rem",
+                      }}
+                    />
+                    <input
+                      placeholder="Expression (e.g. FSC-A / SSC-A)"
+                      value={dpExpr}
+                      onChange={(e) => { setDpExpr(e.target.value); setDpError(null); }}
+                      title="Use channel names directly. Supported: +  −  *  /  **  log10(…)  sqrt(…)"
+                      style={{
+                        width: "100%",
+                        marginBottom: "0.25rem",
+                        borderRadius: "0.4rem",
+                        border: "1px solid rgba(139,92,246,0.4)",
+                        background: "rgba(15,23,42,0.7)",
+                        color: "#c4b5fd",
+                        fontSize: "0.78rem",
+                        padding: "0.2rem 0.4rem",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={!dpName.trim() || !dpExpr.trim() || dpLoading}
+                      onClick={async () => {
+                        if (!file || !dpName.trim() || !dpExpr.trim()) return;
+                        setDpLoading(true);
+                        setDpError(null);
+                        try {
+                          await postJson<DerivedParamInfo>(`${API_BASE}/api/derived-params/${encodeURIComponent(file.id)}`, {
+                            file_id: file.id,
+                            name: dpName.trim(),
+                            expression: dpExpr.trim(),
+                          });
+                          setDpName("");
+                          setDpExpr("");
+                          await fetchDerivedParams(file.id);
+                        } catch (err) {
+                          setDpError(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setDpLoading(false);
+                        }
+                      }}
+                      style={{
+                        padding: "0.25rem 0.7rem",
+                        borderRadius: "999px",
+                        border: "none",
+                        background: "linear-gradient(135deg, #7c3aed, #6d28d9)",
+                        color: "white",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                        opacity: !dpName.trim() || !dpExpr.trim() || dpLoading ? 0.5 : 1,
+                      }}
+                    >
+                      {dpLoading ? "Creating…" : "Create"}
+                    </button>
+                    {dpError && <div style={{ color: "#fca5a5", fontSize: "0.72rem", marginTop: "0.2rem" }}>{dpError}</div>}
+                  </div>
+
+                  {/* Derived param list */}
+                  {derivedParams.length === 0 ? (
+                    <div style={{ color: "#4b5563", fontStyle: "italic", fontSize: "0.72rem" }}>No derived parameters yet.</div>
+                  ) : (
+                    <div>
+                      {derivedParams.map((dp) => (
+                        <div
+                          key={dp.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
+                            padding: "0.2rem 0.1rem",
+                            borderBottom: "1px solid rgba(148,163,184,0.08)",
+                          }}
+                        >
+                          <span style={{ flex: 1, fontSize: "0.72rem", color: "#c4b5fd", fontWeight: 500 }}>{dp.name}</span>
+                          <span style={{ fontSize: "0.68rem", color: "#6b7280", flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            = {dp.expression}
+                          </span>
+                          <button
+                            type="button"
+                            title="Delete"
+                            onClick={async () => {
+                              if (!file) return;
+                              try {
+                                await fetch(
+                                  `${API_BASE}/api/derived-params/${encodeURIComponent(file.id)}/${encodeURIComponent(dp.id)}`,
+                                  { method: "DELETE" },
+                                );
+                                await fetchDerivedParams(file.id);
+                              } catch {
+                                /* ignore */
+                              }
+                            }}
+                            style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: "0.75rem", padding: "0 0.15rem", flexShrink: 0 }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {fcsError && (
             <div
               style={{
@@ -2616,6 +2811,7 @@ export const App: React.FC = () => {
                           setDrawingPolygon(null);
                           setDrawingInterval(null);
                           setGateNameError(null);
+                          setBoolGateError(null);
                         }}
                         style={{
                           padding: "0.25rem 0.6rem",
@@ -2631,6 +2827,40 @@ export const App: React.FC = () => {
                       </button>
                     );
                   })}
+                  {/* L: Boolean gate tool — no canvas interaction needed */}
+                  {plotMode !== "histogram" && (() => {
+                    const active = gateTool === "boolean";
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next: typeof gateTool = active ? null : "boolean";
+                          setGateTool(next);
+                          setDrawMode(false);
+                          setPendingGate(null);
+                          setPendingInterval(null);
+                          setDrawingRect(null);
+                          setDrawingPolygon(null);
+                          setDrawingInterval(null);
+                          setGateNameError(null);
+                          setBoolGateName("");
+                          setBoolExpression("");
+                          setBoolGateError(null);
+                        }}
+                        style={{
+                          padding: "0.25rem 0.6rem",
+                          borderRadius: "999px",
+                          border: active ? "1px solid rgba(167,139,250,0.9)" : "1px solid rgba(148,163,184,0.7)",
+                          fontSize: "0.78rem",
+                          cursor: "pointer",
+                          background: active ? "rgba(139,92,246,0.25)" : "transparent",
+                          color: active ? "#c4b5fd" : "#e5e7eb",
+                        }}
+                      >
+                        Bool
+                      </button>
+                    );
+                  })()}
                 </div>
                 {gateTool === "rectangle" && pendingGate && (
                   <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
@@ -2888,6 +3118,93 @@ export const App: React.FC = () => {
                     >
                       Cancel
                     </button>
+                  </div>
+                )}
+                {/* L: Boolean gate creation form */}
+                {gateTool === "boolean" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={boolGateName}
+                      onChange={(e) => { setBoolGateName(e.target.value); setBoolGateError(null); }}
+                      placeholder="Gate name"
+                      style={{
+                        padding: "0.25rem 0.5rem",
+                        width: "110px",
+                        borderRadius: "0.35rem",
+                        border: "1px solid rgba(148,163,184,0.6)",
+                        background: "rgba(15,23,42,0.8)",
+                        color: "white",
+                        fontSize: "0.8rem",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={boolExpression}
+                      onChange={(e) => { setBoolExpression(e.target.value); setBoolGateError(null); }}
+                      placeholder="e.g. GateA AND NOT GateB"
+                      title="AND / OR / NOT operators; use backtick-quotes for gate names with special chars, e.g. `CD4+`"
+                      style={{
+                        padding: "0.25rem 0.5rem",
+                        width: "200px",
+                        borderRadius: "0.35rem",
+                        border: "1px solid rgba(167,139,250,0.5)",
+                        background: "rgba(15,23,42,0.8)",
+                        color: "#c4b5fd",
+                        fontSize: "0.8rem",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!file || !boolExpression.trim()) return;
+                        const name = boolGateName.trim() || "Bool gate";
+                        setBoolGateError(null);
+                        try {
+                          const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
+                            file_id: file.id,
+                            name,
+                            x_channel: "",
+                            y_channel: "",
+                            parent_gate_id: activeGateId,
+                            params: { type: "boolean", expression: boolExpression.trim() },
+                          });
+                          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
+                          redoStackRef.current = [];
+                          await fetchGateTree(file.id);
+                          setBoolGateName("");
+                          setBoolExpression("");
+                          setGateTool(null);
+                        } catch (e) {
+                          if (e instanceof Error && e.message.startsWith("HTTP 409")) {
+                            setBoolGateError("Name already in use");
+                          } else {
+                            setBoolGateError(e instanceof Error ? e.message : "Failed to create gate");
+                          }
+                        }
+                      }}
+                      disabled={!boolExpression.trim()}
+                      style={{
+                        padding: "0.25rem 0.5rem",
+                        borderRadius: "0.35rem",
+                        border: "none",
+                        fontSize: "0.8rem",
+                        cursor: "pointer",
+                        background: "#8b5cf6",
+                        color: "white",
+                        opacity: !boolExpression.trim() ? 0.6 : 1,
+                      }}
+                    >
+                      Create bool gate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setGateTool(null); setBoolGateName(""); setBoolExpression(""); setBoolGateError(null); }}
+                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "1px solid #6b7280", fontSize: "0.8rem", cursor: "pointer", background: "transparent", color: "#9ca3af" }}
+                    >
+                      Cancel
+                    </button>
+                    {boolGateError && <span style={{ color: "#fca5a5", fontSize: "0.75rem" }}>{boolGateError}</span>}
                   </div>
                 )}
               </div>

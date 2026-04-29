@@ -112,7 +112,9 @@ export const App: React.FC = () => {
 
   const [fcsPath, setFcsPath] = React.useState("");
   const [loadedFiles, setLoadedFiles] = React.useState<LoadedFile[]>([]);
-  const [compText, setCompText] = React.useState("");
+  /** J-2: spillover table editor state — channel names (row/col headers) + matrix cells (strings for editing). */
+  const [spillChNames, setSpillChNames] = React.useState<string[]>([]);
+  const [spillMatrix, setSpillMatrix] = React.useState<string[][]>([]);
   const [compStatus, setCompStatus] = React.useState<"idle" | "applying" | "error" | "success">("idle");
   const [compError, setCompError] = React.useState<string | null>(null);
   /** Condition number of the most recently applied spillover matrix (null = raw / unknown). */
@@ -475,6 +477,25 @@ export const App: React.FC = () => {
   );
 
   /** Always pass an explicit path from the browse dialog (`paths[0]`). */
+  /** J-2: Fetch the parsed $SPILLOVER from the backend and populate the table editor. */
+  const loadSpilloverFromFile = React.useCallback(async (fileId: string) => {
+    try {
+      type SpillResp = { file_id: string; channel_names: string[]; matrix: number[][]; cond?: number | null };
+      const res = await fetch(`${API_BASE}/api/compensation/spillover/${encodeURIComponent(fileId)}`);
+      if (!res.ok) {
+        setSpillChNames([]);
+        setSpillMatrix([]);
+        return;
+      }
+      const data = (await res.json()) as SpillResp;
+      setSpillChNames(data.channel_names);
+      setSpillMatrix(data.matrix.map((row) => row.map((v) => String(v))));
+    } catch {
+      setSpillChNames([]);
+      setSpillMatrix([]);
+    }
+  }, []);
+
   const handleLoadFcs = React.useCallback(async (path: string) => {
     const pathTrim = path.trim();
     if (!pathTrim) return;
@@ -551,12 +572,8 @@ export const App: React.FC = () => {
         tx: DEFAULT_X_TRANSFORM,
         ty: DEFAULT_Y_TRANSFORM,
       });
-      // E-3: auto-populate spillover textarea when the file embeds $SPILLOVER
-      if (first.spillover && first.spillover.length > 0) {
-        setCompText(first.spillover.map((row: number[]) => row.join(",")).join("\n"));
-      } else {
-        setCompText("");
-      }
+      // J-2: auto-populate spillover table when the file embeds $SPILLOVER
+      void loadSpilloverFromFile(loaded.id);
       // E-5: reset compensation badge — fresh file load always starts uncompensated
       setCompStatus("idle");
       setCompCond(null);
@@ -824,13 +841,8 @@ export const App: React.FC = () => {
           setCompStatus("idle");
         }
         setCompError(null);
-        // F-5: populate spillover textarea from first file's metadata
-        const firstSpillover = meta[0]?.spillover;
-        if (firstSpillover && firstSpillover.length > 0) {
-          setCompText(firstSpillover.map((row) => row.join(",")).join("\n"));
-        } else {
-          setCompText("");
-        }
+        // J-2: populate spillover table from backend for first file
+        void loadSpilloverFromFile(firstLoadedId);
       }
 
       if (loaded[0]?.id) {
@@ -1650,13 +1662,8 @@ export const App: React.FC = () => {
                         setLoadedFiles((prev) =>
                           prev.map((f) => (f.id === lf.id ? updated : f)),
                         );
-                        // E-3: auto-populate spillover textarea on file switch
-                        const sw = meta.spillover ?? lf.spillover ?? null;
-                        if (sw && sw.length > 0) {
-                          setCompText(sw.map((row: number[]) => row.join(",")).join("\n"));
-                        } else {
-                          setCompText("");
-                        }
+                        // J-2: auto-populate spillover table on file switch
+                        void loadSpilloverFromFile(lf.id);
                         // E-5: sync compensation badge with backend state for this file
                         try {
                           type CompStatusResp = { is_compensated: boolean; cond?: number | null };
@@ -1872,6 +1879,7 @@ export const App: React.FC = () => {
                 </label>
               </div>
 
+              {/* J-2: Spillover table editor */}
               <div
                 style={{
                   marginTop: "0.4rem",
@@ -1880,58 +1888,104 @@ export const App: React.FC = () => {
                   color: "#9ca3af",
                 }}
               >
-                <div style={{ marginBottom: "0.25rem" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.4rem" }}>
                   <strong>Compensation (optional)</strong>
+                  {file && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await loadSpilloverFromFile(file.id);
+                        setCompStatus("idle");
+                        setCompError(null);
+                      }}
+                      style={{
+                        padding: "0.2rem 0.5rem",
+                        borderRadius: "0.4rem",
+                        border: "1px solid rgba(74,222,128,0.6)",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                        background: "rgba(34,197,94,0.15)",
+                        color: "#4ade80",
+                      }}
+                    >
+                      Load from file
+                    </button>
+                  )}
                 </div>
-                <div style={{ marginBottom: "0.25rem" }}>
-                  Paste a square spillover matrix (comma-separated, one row per line)
-                  matching this file&apos;s channel order.
-                </div>
-                {file?.spillover && file.spillover.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const text = file.spillover!
-                        .map((row) => row.join(","))
-                        .join("\n");
-                      setCompText(text);
-                      setCompStatus("idle");
-                      setCompError(null);
-                    }}
-                    style={{
-                      marginBottom: "0.35rem",
-                      padding: "0.3rem 0.6rem",
-                      borderRadius: "0.4rem",
-                      border: "1px solid rgba(74,222,128,0.6)",
-                      fontSize: "0.8rem",
-                      cursor: "pointer",
-                      background: "rgba(34,197,94,0.2)",
-                      color: "#4ade80",
-                    }}
-                  >
-                    Use file spillover
-                  </button>
+                {spillChNames.length > 0 ? (
+                  <div style={{ overflowX: "auto", marginBottom: "0.4rem" }}>
+                    <table style={{ borderCollapse: "collapse", fontSize: "0.72rem" }}>
+                      <thead>
+                        <tr>
+                          <td style={{ minWidth: "12px" }} />
+                          {spillChNames.map((name, j) => (
+                            <th key={j} style={{ padding: "0 0.2rem 0.2rem", fontWeight: "normal" }}>
+                              <input
+                                value={name}
+                                onChange={(e) => {
+                                  const next = [...spillChNames];
+                                  next[j] = e.target.value;
+                                  setSpillChNames(next);
+                                  setCompStatus("idle");
+                                  setCompError(null);
+                                }}
+                                style={{
+                                  width: "68px",
+                                  background: "rgba(15,23,42,0.7)",
+                                  border: "1px solid rgba(148,163,184,0.4)",
+                                  borderRadius: "0.3rem",
+                                  color: "#c7d2fe",
+                                  fontSize: "0.7rem",
+                                  padding: "0.15rem 0.25rem",
+                                  textAlign: "center",
+                                }}
+                              />
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {spillMatrix.map((row, i) => (
+                          <tr key={i}>
+                            <td style={{ color: "#6b7280", paddingRight: "0.3rem", fontSize: "0.68rem", whiteSpace: "nowrap", maxWidth: "68px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {spillChNames[i] ?? ""}
+                            </td>
+                            {row.map((val, j) => (
+                              <td key={j} style={{ padding: "0.1rem 0.15rem" }}>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={val}
+                                  onChange={(e) => {
+                                    const next = spillMatrix.map((r) => [...r]);
+                                    next[i][j] = e.target.value;
+                                    setSpillMatrix(next);
+                                    setCompStatus("idle");
+                                    setCompError(null);
+                                  }}
+                                  style={{
+                                    width: "68px",
+                                    background: i === j ? "rgba(34,197,94,0.08)" : "rgba(15,23,42,0.7)",
+                                    border: "1px solid rgba(148,163,184,0.3)",
+                                    borderRadius: "0.3rem",
+                                    color: "white",
+                                    fontSize: "0.72rem",
+                                    padding: "0.15rem 0.25rem",
+                                    textAlign: "center",
+                                  }}
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ marginBottom: "0.4rem", color: "#4b5563", fontStyle: "italic", fontSize: "0.78rem" }}>
+                    No spillover loaded — click &quot;Load from file&quot; to auto-populate from the FCS header.
+                  </div>
                 )}
-                <textarea
-                  value={compText}
-                  onChange={(e) => {
-                    setCompText(e.target.value);
-                    setCompStatus("idle");
-                    setCompError(null);
-                  }}
-                  rows={3}
-                  placeholder={"1,0,0\n0,1,0\n0,0,1"}
-                  style={{
-                    width: "100%",
-                    borderRadius: "0.6rem",
-                    border: "1px solid rgba(148,163,184,0.6)",
-                    backgroundColor: "rgba(15,23,42,0.7)",
-                    color: "white",
-                    fontSize: "0.8rem",
-                    padding: "0.4rem 0.5rem",
-                    fontFamily: "monospace",
-                  }}
-                />
                 <div
                   style={{
                     display: "flex",
@@ -1945,32 +1999,31 @@ export const App: React.FC = () => {
                   <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                   <button
                     type="button"
-                    disabled={compStatus === "applying" || !compText.trim()}
+                    disabled={compStatus === "applying" || spillMatrix.length === 0}
                     onClick={async () => {
                       if (!file) return;
                       setCompStatus("applying");
                       setCompError(null);
                       try {
-                        const rows = compText
-                          .split(/\r?\n/)
-                          .map((line) =>
-                            line
-                              .trim()
-                              .split(/[,\t]/)
-                              .filter((v) => v.length > 0)
-                              .map((v) => Number(v)),
-                          )
-                          .filter((r) => r.length > 0);
-                        if (!rows.length) {
-                          throw new Error("Compensation matrix is empty");
-                        }
+                        const rows = spillMatrix.map((row) =>
+                          row.map((v) => {
+                            const n = Number(v);
+                            if (!Number.isFinite(n)) throw new Error(`Invalid cell value: "${v}"`);
+                            return n;
+                          }),
+                        );
+                        if (!rows.length) throw new Error("Compensation matrix is empty");
                         const n = rows[0].length;
-                        if (!rows.every((r) => r.length === n)) {
-                          throw new Error("Matrix must be square (same row length)");
-                        }
-                        const body = { file_id: file.id, spillover: rows };
+                        if (!rows.every((r) => r.length === n)) throw new Error("Matrix rows have inconsistent lengths");
+                        if (rows.length !== n) throw new Error("Matrix must be square (rows !== columns)");
                         // E-2: capture condition number from apply response
                         type CompApplyResp = { file_id: string; n_channels: number; cond?: number | null };
+                        const body: { file_id: string; spillover: number[][]; channel_names?: string[] } = {
+                          file_id: file.id,
+                          spillover: rows,
+                        };
+                        // J-2: send channel_names for partial-channel compensation when available
+                        if (spillChNames.length === n) body.channel_names = spillChNames;
                         const applyResp = await postJson<CompApplyResp>(`${API_BASE}/api/compensation/apply`, body);
                         setCompCond(applyResp?.cond ?? null);
                         setIsCompensated(true);
@@ -1993,8 +2046,7 @@ export const App: React.FC = () => {
                       fontSize: "0.8rem",
                       fontWeight: 500,
                       cursor: "pointer",
-                      background:
-                        "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
+                      background: "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
                       color: "white",
                       opacity: compStatus === "applying" ? 0.7 : 1,
                       whiteSpace: "nowrap",
@@ -2580,6 +2632,25 @@ export const App: React.FC = () => {
                       }}
                     >
                       {isCompensated ? "Comp" : "Raw"}
+                    </span>
+                  )}
+                  {/* J-3: time channel auto-detection badge */}
+                  {file && channels.some((ch) => ch.name.toLowerCase() === "time") && (
+                    <span
+                      title="This file includes a Time channel. Select it as the X axis to view time-domain data."
+                      style={{
+                        padding: "0.1rem 0.45rem",
+                        borderRadius: "999px",
+                        fontSize: "0.65rem",
+                        fontWeight: 600,
+                        letterSpacing: "0.03em",
+                        userSelect: "none",
+                        background: "rgba(99,102,241,0.18)",
+                        color: "#a5b4fc",
+                        border: "1px solid rgba(99,102,241,0.4)",
+                      }}
+                    >
+                      Time
                     </span>
                   )}
                   {plotMode === "density" && (

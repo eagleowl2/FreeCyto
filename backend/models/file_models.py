@@ -96,11 +96,32 @@ class FileHistogramResponse(BaseModel):
   x_max: float
 
 
+class SpilloverParseResponse(BaseModel):
+  """Response from parsing a file's embedded $SPILLOVER / $SPILL string."""
+
+  file_id: str
+  channel_names: List[str] = Field(..., description="Channel names from the spillover string (in matrix order)")
+  matrix: List[List[float]] = Field(..., description="N×N spillover matrix")
+  cond: Optional[float] = Field(
+    None,
+    description="Condition number of the matrix. <10 = well-conditioned, >100 = poorly-conditioned.",
+  )
+
+
 class CompensationApplyRequest(BaseModel):
   file_id: str = Field(..., description="ID of the file to compensate")
   spillover: List[List[float]] = Field(
     ...,
     description="Square spillover (compensation) matrix in channel order",
+  )
+  channel_names: Optional[List[str]] = Field(
+    None,
+    description=(
+      "Channel names corresponding to matrix rows/columns. "
+      "When provided, compensation is applied only to these channels; "
+      "FSC/SSC/Time and other channels are left unchanged. "
+      "When omitted, the matrix must be square with dimension == total channel count."
+    ),
   )
 
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import io
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from models.file_models import FileDensityResponse, FileEventsResponse
 from models.gate_models import GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest
+from services import fcs_export as fcs_export_service
 from services import gates as gates_service
 from services.gates import GateNameExistsError
 
@@ -189,6 +192,27 @@ async def update_gate(gate_id: str, body: GateUpdateRequest) -> GateResponse:
     raise HTTPException(status_code=400, detail=str(exc)) from exc
   _snapshot_session_async()
   return resp
+
+
+@router.get("/{gate_id}/export-fcs")
+async def export_gate_fcs(gate_id: str) -> StreamingResponse:
+  """Download gated events as a minimal FCS 3.1 file.
+
+  The exported file contains only the events that pass through this gate
+  (using the same compensation state as the in-memory store).
+  """
+  try:
+    fcs_bytes, filename = fcs_export_service.export_gate_fcs(gate_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  safe_filename = filename.replace('"', "")
+  return StreamingResponse(
+    io.BytesIO(fcs_bytes),
+    media_type="application/octet-stream",
+    headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+  )
 
 
 @router.delete("/{gate_id}")

@@ -247,6 +247,10 @@ export const App: React.FC = () => {
   const [dpError, setDpError] = React.useState<string | null>(null);
   const [dpLoading, setDpLoading] = React.useState(false);
 
+  // M: histogram overlay — gate IDs selected for overlay + cached histogram data per gate
+  const [histOverlayIds, setHistOverlayIds] = React.useState<string[]>([]);
+  const [histOverlayData, setHistOverlayData] = React.useState<Record<string, HistogramData>>({});
+
   /** Monotonic id for plot data fetches; stale responses must not overwrite React state (see FRONTEND_REVIEW #1). */
   const plotRequestGenerationRef = React.useRef(0);
 
@@ -668,6 +672,8 @@ export const App: React.FC = () => {
     setTransformedRange(null);
     setDensity(null);
     setHistData(null);
+    // M: clear overlay data on any plot parameter change to avoid stale data
+    setHistOverlayData({});
     void (async () => {
       try {
         if (plotMode === "histogram") {
@@ -2200,8 +2206,24 @@ export const App: React.FC = () => {
                   <strong>Sample:</strong>{" "}
                   {file.sample_name || file.path.split(/[/\\]/).pop()}
                 </div>
-                <div data-testid="file-event-count">
-                  <strong>Events:</strong> {file.event_count.toLocaleString()}
+                <div data-testid="file-event-count" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <span><strong>Events:</strong> {file.event_count.toLocaleString()}</span>
+                  {/* M: Download all (compensated) events as FCS */}
+                  <a
+                    href={`${API_BASE}/api/files/${encodeURIComponent(file.id)}/export-fcs`}
+                    download
+                    title="Download all events as FCS 3.1 file"
+                    style={{
+                      fontSize: "0.72rem",
+                      color: "#94a3b8",
+                      textDecoration: "none",
+                      border: "1px solid rgba(148,163,184,0.35)",
+                      borderRadius: "0.3rem",
+                      padding: "0 0.35rem",
+                    }}
+                  >
+                    ↓ FCS
+                  </a>
                 </div>
               </div>
               <div
@@ -3902,6 +3924,54 @@ export const App: React.FC = () => {
                   );
                 });
               })()}
+              {/* ── M: Overlay histogram fills (per checked gate) ── */}
+              {plotMode === "histogram" && transformedRange && histOverlayIds.length > 0 && (() => {
+                const OVERLAY_COLORS = ["#f59e0b","#ec4899","#22c55e","#8b5cf6","#06b6d4","#f97316","#a3e635","#e879f9"];
+                const { xMin: rXMin, xMax: rXMax, yMax: maxCount } = transformedRange;
+                const spanX = rXMax - rXMin || 1;
+                const effectiveMax = maxCount || 1;
+                return histOverlayIds.map((gid, colorIdx) => {
+                  const od = histOverlayData[gid];
+                  if (!od) return null;
+                  const color = OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length]!;
+                  const overlayGate = gateList.find((g) => g.id === gid);
+                  // Build a filled area polygon for the overlay histogram
+                  const pts: string[] = [];
+                  pts.push(`${ml + plotAreaW * Math.max(0, Math.min(1, ((od.binEdges[0] ?? rXMin) - rXMin) / spanX))},${mt + plotAreaH}`);
+                  od.counts.forEach((cnt, i) => {
+                    const e0 = od.binEdges[i] ?? rXMin;
+                    const e1 = od.binEdges[i + 1] ?? rXMax;
+                    const x0 = ml + plotAreaW * Math.max(0, Math.min(1, (e0 - rXMin) / spanX));
+                    const x1 = ml + plotAreaW * Math.max(0, Math.min(1, (e1 - rXMin) / spanX));
+                    const y0 = mt + plotAreaH - plotAreaH * (cnt / effectiveMax);
+                    pts.push(`${x0},${y0}`);
+                    pts.push(`${x1},${y0}`);
+                  });
+                  const lastEdge = od.binEdges[od.counts.length] ?? rXMax;
+                  pts.push(`${ml + plotAreaW * Math.max(0, Math.min(1, (lastEdge - rXMin) / spanX))},${mt + plotAreaH}`);
+                  const labelText = overlayGate ? `${overlayGate.name} (${overlayGate.count.toLocaleString()})` : gid;
+                  const labelX = ml + 6 + colorIdx * 90;
+                  return (
+                    <g key={gid} style={{ pointerEvents: "none" }}>
+                      <polyline
+                        points={pts.join(" ")}
+                        fill={color + "30"}
+                        stroke={color}
+                        strokeWidth={1.2}
+                        style={{ pointerEvents: "none" }}
+                      />
+                      {/* Tiny legend chip at top of plot area */}
+                      <rect x={labelX} y={mt + 3} width={labelText.length * 5.2 + 6} height={11} rx={3}
+                        fill="rgba(15,23,42,0.75)" style={{ pointerEvents: "none" }} />
+                      <circle cx={labelX + 5} cy={mt + 8.5} r={3} fill={color} style={{ pointerEvents: "none" }} />
+                      <text x={labelX + 11} y={mt + 11.5} fill={color} fontSize={8.5} fontWeight={600}
+                        dominantBaseline="auto" style={{ userSelect: "none", pointerEvents: "none" }}>
+                        {labelText}
+                      </text>
+                    </g>
+                  );
+                });
+              })()}
               {/* ── Interval gate overlays (histogram mode) ── */}
               {plotMode === "histogram" && transformedRange && (() => {
                 const GATE_COLORS = ["#22c55e","#3b82f6","#f59e0b","#ec4899","#8b5cf6","#06b6d4","#f97316","#a3e635"];
@@ -3992,6 +4062,99 @@ export const App: React.FC = () => {
             </svg>
             </div>
           </div>
+
+          {/* M: Histogram overlay panel — visible only in histogram mode */}
+          {file && plotMode === "histogram" && (
+            <div
+              style={{
+                marginTop: "0.5rem",
+                padding: "0.45rem 0.6rem",
+                borderRadius: "0.65rem",
+                background: "rgba(15,23,42,0.55)",
+                border: "1px solid rgba(245,158,11,0.3)",
+                fontSize: "0.75rem",
+                color: "#9ca3af",
+              }}
+            >
+              <div style={{ fontWeight: 600, color: "#fcd34d", marginBottom: "0.3rem", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                Overlay populations
+              </div>
+              {gateList.length === 0 ? (
+                <span style={{ color: "#4b5563", fontStyle: "italic" }}>No gates yet — draw gates to compare their distributions.</span>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                  {gateList.map((g) => {
+                    const checked = histOverlayIds.includes(g.id);
+                    return (
+                      <label
+                        key={g.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.25rem",
+                          cursor: "pointer",
+                          padding: "0.15rem 0.4rem",
+                          borderRadius: "999px",
+                          border: checked ? "1px solid rgba(245,158,11,0.8)" : "1px solid rgba(148,163,184,0.3)",
+                          background: checked ? "rgba(245,158,11,0.12)" : "transparent",
+                          fontSize: "0.72rem",
+                          color: checked ? "#fcd34d" : "#9ca3af",
+                          transition: "all 0.1s",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={async (e) => {
+                            if (e.target.checked) {
+                              setHistOverlayIds((prev) => [...prev, g.id]);
+                              // Fetch histogram for this gate population
+                              if (!file) return;
+                              try {
+                                type HistResp = { bin_edges: number[]; counts: number[]; x_min: number; x_max: number };
+                                const params = new URLSearchParams({
+                                  channel: xChannel,
+                                  transform: transformX,
+                                  bins: "256",
+                                  gate_id: g.id,
+                                });
+                                const resp = await getJson<HistResp>(
+                                  `${API_BASE}/api/files/${encodeURIComponent(file.id)}/histogram?${params}`,
+                                );
+                                setHistOverlayData((prev) => ({
+                                  ...prev,
+                                  [g.id]: {
+                                    binEdges: resp.bin_edges,
+                                    counts: resp.counts,
+                                    xMin: resp.x_min,
+                                    xMax: resp.x_max,
+                                  },
+                                }));
+                              } catch { /* non-fatal */ }
+                            } else {
+                              setHistOverlayIds((prev) => prev.filter((id) => id !== g.id));
+                              setHistOverlayData((prev) => {
+                                const next = { ...prev };
+                                delete next[g.id];
+                                return next;
+                              });
+                            }
+                          }}
+                          style={{ accentColor: "#f59e0b", width: 11, height: 11 }}
+                        />
+                        <span>{g.name}</span>
+                        {checked && (
+                          <span style={{ color: "#6b7280", fontSize: "0.65rem" }}>
+                            {g.count.toLocaleString()}
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
             </div>
             {file && (
               <div
@@ -4169,6 +4332,26 @@ export const App: React.FC = () => {
                         >
                           Export CSV
                         </button>
+                        {/* M: Export gated events as FCS */}
+                        {activeGateId && (
+                          <a
+                            href={`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/export-fcs`}
+                            download
+                            style={{
+                              padding: "0.2rem 0.55rem",
+                              borderRadius: "0.4rem",
+                              border: "1px solid rgba(34,197,94,0.45)",
+                              fontSize: "0.75rem",
+                              cursor: "pointer",
+                              background: "rgba(34,197,94,0.1)",
+                              color: "#4ade80",
+                              textDecoration: "none",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ↓ Export FCS
+                          </a>
+                        )}
                       </div>
                       {/* Stats table */}
                       <div style={{ overflowX: "auto" }}>

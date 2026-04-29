@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from models.file_models import (
   FileDensityResponse,
@@ -14,6 +16,7 @@ from models.file_models import (
   FileMetadata,
 )
 from models.gate_models import GateResponse
+from services import fcs_export as fcs_export_service
 from services import fcs_parser, gates as gates_service, storage, transforms as transform_service
 import numpy as np
 
@@ -414,6 +417,23 @@ async def get_histogram(
     counts=[int(c) for c in counts_arr],
     x_min=x_min,
     x_max=x_max,
+  )
+
+
+@router.get("/{file_id}/export-fcs")
+async def export_file_fcs(file_id: str) -> StreamingResponse:
+  """Download all (compensated) events for a file as a minimal FCS 3.1 file."""
+  try:
+    fcs_bytes, filename = fcs_export_service.export_file_fcs(file_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  safe_filename = filename.replace('"', "")
+  return StreamingResponse(
+    io.BytesIO(fcs_bytes),
+    media_type="application/octet-stream",
+    headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
   )
 
 

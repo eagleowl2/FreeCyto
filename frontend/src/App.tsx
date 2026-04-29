@@ -215,6 +215,24 @@ export const App: React.FC = () => {
   const [drawingInterval, setDrawingInterval] = React.useState<{ startX: number; endX: number } | null>(null);
   const [pendingInterval, setPendingInterval] = React.useState<{ xMin: number; xMax: number; gateName: string } | null>(null);
 
+  // K: sample groups, gating templates, batch statistics
+  type SampleInfo = { file_id: string; label: string };
+  type GroupInfo = { id: string; name: string; samples: SampleInfo[]; template_id: string | null };
+  type BatchStatRow = { file_id: string; label: string; gate_name: string; count: number; pct_of_parent: number; pct_of_total: number; parent_count: number };
+  const [groups, setGroups] = React.useState<GroupInfo[]>([]);
+  const [groupPanelOpen, setGroupPanelOpen] = React.useState(false);
+  const [newGroupName, setNewGroupName] = React.useState("");
+  const [newGroupFileIds, setNewGroupFileIds] = React.useState<string[]>([]);
+  const [groupError, setGroupError] = React.useState<string | null>(null);
+  const [expandedGroupId, setExpandedGroupId] = React.useState<string | null>(null);
+  const [batchGateName, setBatchGateName] = React.useState("");
+  const [batchStats, setBatchStats] = React.useState<{ groupId: string; rows: BatchStatRow[] } | null>(null);
+  const [batchStatsLoading, setBatchStatsLoading] = React.useState(false);
+  const [tplSourceFileId, setTplSourceFileId] = React.useState("");
+  const [tplName, setTplName] = React.useState("");
+  const [tplStatus, setTplStatus] = React.useState<"idle" | "working" | "done" | "error">("idle");
+  const [tplError, setTplError] = React.useState<string | null>(null);
+
   /** Monotonic id for plot data fetches; stale responses must not overwrite React state (see FRONTEND_REVIEW #1). */
   const plotRequestGenerationRef = React.useRef(0);
 
@@ -477,6 +495,32 @@ export const App: React.FC = () => {
   );
 
   /** Always pass an explicit path from the browse dialog (`paths[0]`). */
+  /** K: Fetch and sync group list from backend. */
+  const fetchGroups = React.useCallback(async () => {
+    try {
+      type GroupResp = { id: string; name: string; samples: { file_id: string; label: string }[]; template_id: string | null };
+      const data = await getJson<GroupResp[]>(`${API_BASE}/api/groups`);
+      setGroups(data);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  /** K: Create a new group. */
+  const createGroup = React.useCallback(async (name: string, fileIds: string[]) => {
+    type GroupResp = { id: string; name: string; samples: { file_id: string; label: string }[]; template_id: string | null };
+    const grp = await postJson<GroupResp>(`${API_BASE}/api/groups`, { name, file_ids: fileIds });
+    setGroups((prev) => [...prev, grp]);
+    return grp;
+  }, []);
+
+  /** K: Delete a group. */
+  const deleteGroup = React.useCallback(async (groupId: string) => {
+    await fetch(`${API_BASE}/api/groups/${encodeURIComponent(groupId)}`, { method: "DELETE" });
+    setGroups((prev) => prev.filter((g) => g.id !== groupId));
+    if (expandedGroupId === groupId) setExpandedGroupId(null);
+  }, [expandedGroupId]);
+
   /** J-2: Fetch the parsed $SPILLOVER from the backend and populate the table editor. */
   const loadSpilloverFromFile = React.useCallback(async (fileId: string) => {
     try {
@@ -1724,6 +1768,393 @@ export const App: React.FC = () => {
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* K: Sample groups panel */}
+          {loadedFiles.length > 0 && (
+            <div style={{ marginBottom: "0.8rem" }}>
+              <button
+                type="button"
+                onClick={() => { setGroupPanelOpen((o) => !o); if (!groupPanelOpen) void fetchGroups(); }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.35rem",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "0.3rem 0.5rem",
+                  borderRadius: "0.55rem",
+                  border: "1px solid rgba(148,163,184,0.35)",
+                  background: groupPanelOpen ? "rgba(99,102,241,0.12)" : "transparent",
+                  color: "#c7d2fe",
+                  fontSize: "0.78rem",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                <span>{groupPanelOpen ? "▾" : "▸"}</span>
+                <span>Sample Groups</span>
+                {groups.length > 0 && (
+                  <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "#6b7280" }}>
+                    {groups.length}
+                  </span>
+                )}
+              </button>
+
+              {groupPanelOpen && (
+                <div
+                  style={{
+                    marginTop: "0.4rem",
+                    padding: "0.5rem",
+                    borderRadius: "0.65rem",
+                    background: "rgba(15,23,42,0.85)",
+                    border: "1px solid rgba(99,102,241,0.3)",
+                    fontSize: "0.78rem",
+                    color: "#9ca3af",
+                  }}
+                >
+                  {/* Create group form */}
+                  <div style={{ marginBottom: "0.5rem" }}>
+                    <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: "0.3rem" }}>Create group</div>
+                    <input
+                      placeholder="Group name"
+                      value={newGroupName}
+                      onChange={(e) => setNewGroupName(e.target.value)}
+                      style={{
+                        width: "100%",
+                        marginBottom: "0.3rem",
+                        borderRadius: "0.4rem",
+                        border: "1px solid rgba(148,163,184,0.4)",
+                        background: "rgba(15,23,42,0.7)",
+                        color: "white",
+                        fontSize: "0.78rem",
+                        padding: "0.2rem 0.4rem",
+                      }}
+                    />
+                    <div style={{ marginBottom: "0.3rem", fontSize: "0.72rem", color: "#6b7280" }}>Select files:</div>
+                    {loadedFiles.map((lf) => {
+                      const label = lf.sample_name || lf.path.split(/[/\\]/).pop() || lf.id;
+                      const checked = newGroupFileIds.includes(lf.id);
+                      return (
+                        <label
+                          key={lf.id}
+                          style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginBottom: "0.15rem", cursor: "pointer" }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setNewGroupFileIds((prev) =>
+                                e.target.checked ? [...prev, lf.id] : prev.filter((id) => id !== lf.id),
+                              )
+                            }
+                          />
+                          <span style={{ fontSize: "0.72rem", color: "#e5e7eb" }}>{label}</span>
+                        </label>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      disabled={!newGroupName.trim() || newGroupFileIds.length === 0}
+                      onClick={async () => {
+                        setGroupError(null);
+                        try {
+                          await createGroup(newGroupName.trim(), newGroupFileIds);
+                          setNewGroupName("");
+                          setNewGroupFileIds([]);
+                        } catch (err) {
+                          setGroupError(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
+                      style={{
+                        marginTop: "0.3rem",
+                        padding: "0.25rem 0.7rem",
+                        borderRadius: "999px",
+                        border: "none",
+                        background: "linear-gradient(135deg, #6366f1, #4f46e5)",
+                        color: "white",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                        opacity: !newGroupName.trim() || newGroupFileIds.length === 0 ? 0.5 : 1,
+                      }}
+                    >
+                      Create
+                    </button>
+                    {groupError && <div style={{ color: "#fca5a5", fontSize: "0.72rem", marginTop: "0.2rem" }}>{groupError}</div>}
+                  </div>
+
+                  {/* Group list */}
+                  {groups.length === 0 && (
+                    <div style={{ color: "#4b5563", fontStyle: "italic", fontSize: "0.72rem" }}>No groups yet.</div>
+                  )}
+                  {groups.map((grp) => {
+                    const isExpanded = expandedGroupId === grp.id;
+                    return (
+                      <div
+                        key={grp.id}
+                        style={{
+                          marginBottom: "0.4rem",
+                          borderRadius: "0.5rem",
+                          border: "1px solid rgba(99,102,241,0.25)",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {/* Group header row */}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            padding: "0.25rem 0.4rem",
+                            background: isExpanded ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.06)",
+                            gap: "0.4rem",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setExpandedGroupId(isExpanded ? null : grp.id)}
+                            style={{ background: "none", border: "none", color: "#c7d2fe", cursor: "pointer", fontSize: "0.78rem", padding: 0, flex: 1, textAlign: "left" }}
+                          >
+                            {isExpanded ? "▾" : "▸"} {grp.name}
+                            <span style={{ marginLeft: "0.4rem", color: "#6b7280", fontSize: "0.7rem" }}>
+                              ({grp.samples.length} {grp.samples.length === 1 ? "sample" : "samples"})
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            title="Delete group"
+                            onClick={() => void deleteGroup(grp.id)}
+                            style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: "0.8rem", padding: "0 0.2rem" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        {/* Expanded group details */}
+                        {isExpanded && (
+                          <div style={{ padding: "0.4rem 0.5rem", background: "rgba(15,23,42,0.6)" }}>
+                            {/* Sample list */}
+                            <div style={{ marginBottom: "0.4rem" }}>
+                              {grp.samples.map((s) => (
+                                <div key={s.file_id} style={{ fontSize: "0.72rem", color: "#9ca3af", padding: "0.1rem 0" }}>
+                                  {s.label}
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Template section */}
+                            <div style={{ borderTop: "1px solid rgba(148,163,184,0.15)", paddingTop: "0.4rem", marginBottom: "0.4rem" }}>
+                              <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: "0.25rem", fontSize: "0.72rem" }}>
+                                Gating Template {grp.template_id && <span style={{ color: "#4ade80" }}>✓ extracted</span>}
+                              </div>
+                              <select
+                                value={tplSourceFileId}
+                                onChange={(e) => setTplSourceFileId(e.target.value)}
+                                style={{
+                                  width: "100%",
+                                  marginBottom: "0.25rem",
+                                  borderRadius: "0.35rem",
+                                  border: "1px solid rgba(148,163,184,0.4)",
+                                  background: "rgba(15,23,42,0.7)",
+                                  color: "white",
+                                  fontSize: "0.72rem",
+                                  padding: "0.18rem 0.3rem",
+                                }}
+                              >
+                                <option value="">— source file —</option>
+                                {grp.samples.map((s) => (
+                                  <option key={s.file_id} value={s.file_id}>{s.label}</option>
+                                ))}
+                              </select>
+                              <input
+                                placeholder="Template name"
+                                value={tplName}
+                                onChange={(e) => setTplName(e.target.value)}
+                                style={{
+                                  width: "100%",
+                                  marginBottom: "0.25rem",
+                                  borderRadius: "0.35rem",
+                                  border: "1px solid rgba(148,163,184,0.4)",
+                                  background: "rgba(15,23,42,0.7)",
+                                  color: "white",
+                                  fontSize: "0.72rem",
+                                  padding: "0.18rem 0.3rem",
+                                }}
+                              />
+                              <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
+                                <button
+                                  type="button"
+                                  disabled={!tplSourceFileId || !tplName.trim() || tplStatus === "working"}
+                                  onClick={async () => {
+                                    setTplStatus("working");
+                                    setTplError(null);
+                                    try {
+                                      type TplResp = { id: string; name: string; source_file_id: string; gate_count: number };
+                                      await postJson<TplResp>(`${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/template`, {
+                                        source_file_id: tplSourceFileId,
+                                        template_name: tplName.trim(),
+                                      });
+                                      await fetchGroups();
+                                      setTplName("");
+                                      setTplSourceFileId("");
+                                      setTplStatus("done");
+                                    } catch (err) {
+                                      setTplError(err instanceof Error ? err.message : String(err));
+                                      setTplStatus("error");
+                                    }
+                                  }}
+                                  style={{
+                                    padding: "0.2rem 0.5rem",
+                                    borderRadius: "999px",
+                                    border: "none",
+                                    background: "rgba(99,102,241,0.5)",
+                                    color: "white",
+                                    fontSize: "0.72rem",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Extract
+                                </button>
+                                {grp.template_id && (
+                                  <button
+                                    type="button"
+                                    disabled={tplStatus === "working"}
+                                    onClick={async () => {
+                                      setTplStatus("working");
+                                      setTplError(null);
+                                      try {
+                                        await postJson(`${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/apply-template`, {
+                                          template_id: grp.template_id,
+                                        });
+                                        setTplStatus("done");
+                                        // Refresh gate tree if current file is in this group
+                                        if (file && grp.samples.some((s) => s.file_id === file.id)) {
+                                          await fetchGateTree(file.id);
+                                        }
+                                      } catch (err) {
+                                        setTplError(err instanceof Error ? err.message : String(err));
+                                        setTplStatus("error");
+                                      }
+                                    }}
+                                    style={{
+                                      padding: "0.2rem 0.5rem",
+                                      borderRadius: "999px",
+                                      border: "none",
+                                      background: "rgba(34,197,94,0.4)",
+                                      color: "white",
+                                      fontSize: "0.72rem",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    Apply to all
+                                  </button>
+                                )}
+                              </div>
+                              {tplStatus === "done" && <div style={{ color: "#4ade80", fontSize: "0.7rem", marginTop: "0.2rem" }}>Done</div>}
+                              {tplStatus === "error" && tplError && <div style={{ color: "#fca5a5", fontSize: "0.7rem", marginTop: "0.2rem" }}>{tplError}</div>}
+                            </div>
+
+                            {/* Batch statistics section */}
+                            <div style={{ borderTop: "1px solid rgba(148,163,184,0.15)", paddingTop: "0.4rem" }}>
+                              <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: "0.25rem", fontSize: "0.72rem" }}>Batch Statistics</div>
+                              <div style={{ display: "flex", gap: "0.3rem", marginBottom: "0.3rem" }}>
+                                <input
+                                  placeholder="Gate name"
+                                  value={batchGateName}
+                                  onChange={(e) => setBatchGateName(e.target.value)}
+                                  style={{
+                                    flex: 1,
+                                    borderRadius: "0.35rem",
+                                    border: "1px solid rgba(148,163,184,0.4)",
+                                    background: "rgba(15,23,42,0.7)",
+                                    color: "white",
+                                    fontSize: "0.72rem",
+                                    padding: "0.18rem 0.3rem",
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  disabled={!batchGateName.trim() || batchStatsLoading}
+                                  onClick={async () => {
+                                    setBatchStatsLoading(true);
+                                    try {
+                                      type StatsResp = { group_id: string; gate_name: string; rows: BatchStatRow[] };
+                                      const data = await getJson<StatsResp>(
+                                        `${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/batch-stats?gate_name=${encodeURIComponent(batchGateName.trim())}`,
+                                      );
+                                      setBatchStats({ groupId: grp.id, rows: data.rows });
+                                    } finally {
+                                      setBatchStatsLoading(false);
+                                    }
+                                  }}
+                                  style={{
+                                    padding: "0.2rem 0.5rem",
+                                    borderRadius: "999px",
+                                    border: "none",
+                                    background: "rgba(99,102,241,0.5)",
+                                    color: "white",
+                                    fontSize: "0.72rem",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {batchStatsLoading ? "…" : "Run"}
+                                </button>
+                              </div>
+
+                              {batchStats && batchStats.groupId === grp.id && (
+                                <>
+                                  <div style={{ overflowX: "auto", marginBottom: "0.3rem" }}>
+                                    <table style={{ borderCollapse: "collapse", fontSize: "0.7rem", width: "100%" }}>
+                                      <thead>
+                                        <tr style={{ color: "#6b7280", borderBottom: "1px solid rgba(148,163,184,0.2)" }}>
+                                          <th style={{ textAlign: "left", padding: "0.15rem 0.25rem" }}>Sample</th>
+                                          <th style={{ textAlign: "right", padding: "0.15rem 0.25rem" }}>Count</th>
+                                          <th style={{ textAlign: "right", padding: "0.15rem 0.25rem" }}>% Parent</th>
+                                          <th style={{ textAlign: "right", padding: "0.15rem 0.25rem" }}>% Total</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {batchStats.rows.map((row) => (
+                                          <tr key={row.file_id} style={{ borderBottom: "1px solid rgba(148,163,184,0.1)" }}>
+                                            <td style={{ padding: "0.15rem 0.25rem", color: "#e5e7eb", maxWidth: "100px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                              {row.label}
+                                            </td>
+                                            <td style={{ padding: "0.15rem 0.25rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#e5e7eb" }}>
+                                              {row.count.toLocaleString()}
+                                            </td>
+                                            <td style={{ padding: "0.15rem 0.25rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#93c5fd" }}>
+                                              {row.pct_of_parent.toFixed(1)}%
+                                            </td>
+                                            <td style={{ padding: "0.15rem 0.25rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6b7280" }}>
+                                              {row.pct_of_total.toFixed(1)}%
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  <a
+                                    href={`${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/export.csv?gate_name=${encodeURIComponent(batchGateName.trim())}`}
+                                    download
+                                    style={{
+                                      fontSize: "0.7rem",
+                                      color: "#a5b4fc",
+                                      textDecoration: "none",
+                                      borderBottom: "1px solid rgba(165,180,252,0.4)",
+                                    }}
+                                  >
+                                    ↓ Export CSV
+                                  </a>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

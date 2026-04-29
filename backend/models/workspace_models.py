@@ -40,6 +40,12 @@ class WorkspaceGateDef(BaseModel):
   y_max: float | None = None
   vertices: List[List[float]] | None = None
   expression: str | None = None  # for boolean gates
+  # N: ellipse gate geometry
+  center_x: float | None = None
+  center_y: float | None = None
+  radius_x: float | None = None
+  radius_y: float | None = None
+  angle: float = 0.0
 
 
 class WorkspaceSave(BaseModel):

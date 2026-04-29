@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 import numpy as np
 
-from models.gate_models import BooleanGateCreate, ChannelStats, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate
+from models.gate_models import BooleanGateCreate, ChannelStats, EllipseGateCreate, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate
 from services import storage, transforms as transform_service
 
 
@@ -182,6 +182,36 @@ def _point_in_rect(x: np.ndarray, y: np.ndarray, x_min: float, y_min: float, x_m
   )
 
 
+def _point_in_ellipse(
+  x: np.ndarray,
+  y: np.ndarray,
+  cx: float,
+  cy: float,
+  rx: float,
+  ry: float,
+  angle_deg: float = 0.0,
+) -> np.ndarray:
+  """Test whether each (x[i], y[i]) lies inside the ellipse.
+
+  The ellipse has centre (cx, cy), semi-axes rx (along X) and ry (along Y),
+  and is rotated CCW by *angle_deg* degrees.  Boundary points are included.
+
+  Formula: transform point into the ellipse's own frame (rotate CW by angle)
+  then test the standard axis-aligned ellipse equation.
+  """
+  if rx <= 0.0 or ry <= 0.0:
+    return np.zeros(x.shape[0], dtype=bool)
+  a = np.radians(angle_deg)
+  cos_a = np.cos(a)
+  sin_a = np.sin(a)
+  dx = x - cx
+  dy = y - cy
+  # Rotate into ellipse-aligned frame (CW = inverse of CCW rotation)
+  xr =  cos_a * dx + sin_a * dy
+  yr = -sin_a * dx + cos_a * dy
+  return (xr / rx) ** 2 + (yr / ry) ** 2 <= 1.0
+
+
 def _point_in_polygon(x: np.ndarray, y: np.ndarray, vertices: list[list[float]]) -> np.ndarray:
   """Winding-number test. Boundary = inside (GatingML 2.0). No epsilon hack."""
   n = len(vertices)
@@ -238,6 +268,12 @@ class GateRecord:
   y_max: float | None = None
   vertices: list[list[float]] | None = None
   expression: str | None = None  # L: boolean gate expression
+  # N: ellipse gate geometry (all in transformed space)
+  center_x: float | None = None
+  center_y: float | None = None
+  radius_x: float | None = None
+  radius_y: float | None = None
+  angle: float = 0.0
   _cached_count: int | None = field(default=None, repr=False)
   _cached_pct_total: float | None = field(default=None, repr=False)
   _cached_pct_of_parent: float | None = field(default=None, repr=False)
@@ -475,6 +511,19 @@ def _get_mask(record: GateRecord, _visited: frozenset[str] | None = None) -> np.
         )
     elif record.type == "polygon" and record.vertices:
       gate_mask = _point_in_polygon(x, y, record.vertices)
+    elif record.type == "ellipse":
+      if (
+        record.center_x is not None and record.center_y is not None
+        and record.radius_x is not None and record.radius_y is not None
+      ):
+        gate_mask = _point_in_ellipse(
+          x, y,
+          record.center_x, record.center_y,
+          record.radius_x, record.radius_y,
+          record.angle,
+        )
+      else:
+        gate_mask = np.zeros(n_total, dtype=bool)
     else:
       gate_mask = np.zeros(n_total, dtype=bool)
 
@@ -609,6 +658,13 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
     # Validate expression parses before committing
     _parse_bool_expr(p.expression)
     record = GateRecord(**_common, type="boolean", expression=p.expression)
+  elif p.type == "ellipse":
+    record = GateRecord(
+      **_common, type="ellipse",
+      center_x=p.center_x, center_y=p.center_y,
+      radius_x=p.radius_x, radius_y=p.radius_y,
+      angle=p.angle,
+    )
   else:
     record = GateRecord(**_common, type="polygon", vertices=p.vertices)
 
@@ -675,6 +731,11 @@ def _record_to_response(record: GateRecord) -> GateResponse:
     y_max=record.y_max,
     vertices=record.vertices,
     expression=record.expression,
+    center_x=record.center_x,
+    center_y=record.center_y,
+    radius_x=record.radius_x,
+    radius_y=record.radius_y,
+    angle=record.angle,
     count=count,
     pct_total=round(pct_total, 2),
     pct_of_parent=round(pct_of_parent, 2),
@@ -770,6 +831,21 @@ def update_gate(gate_id: str, body: GateUpdateRequest) -> GateResponse:
       record.x_min = body.x_min
     if body.x_max is not None:
       record.x_max = body.x_max
+  elif record.type == "ellipse":
+    if body.center_x is not None:
+      record.center_x = body.center_x
+    if body.center_y is not None:
+      record.center_y = body.center_y
+    if body.radius_x is not None:
+      if body.radius_x <= 0:
+        raise ValueError("radius_x must be > 0")
+      record.radius_x = body.radius_x
+    if body.radius_y is not None:
+      if body.radius_y <= 0:
+        raise ValueError("radius_y must be > 0")
+      record.radius_y = body.radius_y
+    if body.angle is not None:
+      record.angle = body.angle
   else:
     raise ValueError(f"Unsupported gate type for update: {record.type!r}")
   invalidate_subtree(gate_id)

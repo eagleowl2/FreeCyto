@@ -60,6 +60,11 @@ def build_workspace_save(file_ids: List[str] | None = None) -> WorkspaceSave:
           y_max=gate.y_max,
           vertices=gate.vertices,
           expression=gate.expression,
+          center_x=gate.center_x,
+          center_y=gate.center_y,
+          radius_x=gate.radius_x,
+          radius_y=gate.radius_y,
+          angle=gate.angle,
         )
       )
 
@@ -75,7 +80,7 @@ def build_workspace_save(file_ids: List[str] | None = None) -> WorkspaceSave:
 def load_workspace(ws: WorkspaceSave) -> WorkspaceLoadResult:
   """Load workspace: load files by path, apply compensation, create gates. Returns summary and data for frontend."""
   from models.file_models import ChannelMetadata, FileMetadata
-  from models.gate_models import BooleanGateCreate, GateCreateRequest, IntervalGateCreate, PolygonGateCreate, RectangleGateCreate
+  from models.gate_models import BooleanGateCreate, EllipseGateCreate, GateCreateRequest, IntervalGateCreate, PolygonGateCreate, RectangleGateCreate
 
   if not ws.files:
     return WorkspaceLoadResult(files_loaded=0, compensation_applied=0, gates_created=0, gate_errors=[])
@@ -200,6 +205,19 @@ def load_workspace(ws: WorkspaceSave) -> WorkspaceLoadResult:
         params = IntervalGateCreate(type="interval", x_min=g.x_min, x_max=g.x_max)
       elif g.type == "boolean" and g.expression:
         params = BooleanGateCreate(type="boolean", expression=g.expression)
+      elif (
+        g.type == "ellipse"
+        and g.center_x is not None and g.center_y is not None
+        and g.radius_x is not None and g.radius_y is not None
+      ):
+        params = EllipseGateCreate(
+          type="ellipse",
+          center_x=g.center_x,
+          center_y=g.center_y,
+          radius_x=g.radius_x,
+          radius_y=g.radius_y,
+          angle=g.angle,
+        )
       else:
         continue
       new_parent_id = id_map.get(g.parent_gate_id) if g.parent_gate_id else None

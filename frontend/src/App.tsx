@@ -189,7 +189,11 @@ export const App: React.FC = () => {
     nyMax: number;
     gateName: string;
   } | null>(null);
-  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "interval" | "boolean" | null>("rectangle");
+  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "ellipse" | "interval" | "boolean" | null>("rectangle");
+  // N: pending ellipse gate (after drag, before name + submit)
+  const [pendingEllipse, setPendingEllipse] = React.useState<{
+    nCx: number; nCy: number; nRx: number; nRy: number; gateName: string;
+  } | null>(null);
   const [drawMode, setDrawMode] = React.useState(false);
   const [drawingPolygon, setDrawingPolygon] = React.useState<{ points: { x: number; y: number }[] } | null>(null);
   const [fcsStatus, setFcsStatus] = React.useState<
@@ -253,6 +257,8 @@ export const App: React.FC = () => {
 
   /** Monotonic id for plot data fetches; stale responses must not overwrite React state (see FRONTEND_REVIEW #1). */
   const plotRequestGenerationRef = React.useRef(0);
+  /** N: ref to the main plot SVG for PNG export. */
+  const plotSvgRef = React.useRef<SVGSVGElement>(null);
 
   /** Remember X/Y channel + transforms per file when switching loaded files (FRONTEND_APP_REVIEW NEW-13). */
   const perFileAxesRef = React.useRef(
@@ -2815,6 +2821,7 @@ export const App: React.FC = () => {
                         { id: "rectangle", label: "Rect" },
                         { id: "polygon", label: "Poly" },
                         { id: "quadrant", label: "Quad" },
+                        { id: "ellipse", label: "Ellipse" },
                       ]
                     : [{ id: "interval", label: "Interval" }]
                   ).map((tool) => {
@@ -2829,6 +2836,7 @@ export const App: React.FC = () => {
                           setDrawMode(next !== null);
                           setPendingGate(null);
                           setPendingInterval(null);
+                          setPendingEllipse(null);
                           setDrawingRect(null);
                           setDrawingPolygon(null);
                           setDrawingInterval(null);
@@ -2861,6 +2869,7 @@ export const App: React.FC = () => {
                           setDrawMode(false);
                           setPendingGate(null);
                           setPendingInterval(null);
+                          setPendingEllipse(null);
                           setDrawingRect(null);
                           setDrawingPolygon(null);
                           setDrawingInterval(null);
@@ -3037,6 +3046,78 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => { setPendingInterval(null); setDrawMode(true); }}
+                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "1px solid #6b7280", fontSize: "0.8rem", cursor: "pointer", background: "transparent", color: "#9ca3af" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                {/* N: Ellipse gate name form */}
+                {gateTool === "ellipse" && pendingEllipse && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={pendingEllipse.gateName}
+                      onChange={(e) => {
+                        setGateNameError(null);
+                        setPendingEllipse((p) => (p ? { ...p, gateName: e.target.value } : null));
+                      }}
+                      placeholder="Ellipse gate name"
+                      autoFocus
+                      style={{
+                        padding: "0.25rem 0.5rem",
+                        width: "150px",
+                        borderRadius: "0.35rem",
+                        border: "1px solid rgba(148,163,184,0.6)",
+                        background: "rgba(15,23,42,0.8)",
+                        color: "white",
+                        fontSize: "0.8rem",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!file || !pendingEllipse || !transformedRange) return;
+                        const r = transformedRange;
+                        const cx = r.xMin + (r.xMax - r.xMin) * pendingEllipse.nCx;
+                        const cy = r.yMin + (r.yMax - r.yMin) * pendingEllipse.nCy;
+                        const rx = (r.xMax - r.xMin) * pendingEllipse.nRx;
+                        const ry = (r.yMax - r.yMin) * pendingEllipse.nRy;
+                        const name = pendingEllipse.gateName.trim() || "Ellipse gate";
+                        setGateNameError(null);
+                        try {
+                          const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
+                            file_id: file.id,
+                            name,
+                            x_channel: xChannel,
+                            y_channel: yChannel,
+                            parent_gate_id: activeGateId,
+                            transform_x: transformX,
+                            transform_y: transformY,
+                            arcsinh_cofactor: 150,
+                            params: { type: "ellipse", center_x: cx, center_y: cy, radius_x: rx, radius_y: ry, angle: 0 },
+                          });
+                          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
+                          redoStackRef.current = [];
+                          await fetchGateTree(file.id);
+                          setPendingEllipse(null);
+                          setDrawMode(false);
+                          setGateTool(null);
+                        } catch (e) {
+                          if (e instanceof Error && e.message.startsWith("HTTP 409")) {
+                            setGateNameError("Name already in use");
+                          } else {
+                            setGateNameError(e instanceof Error ? e.message : "Failed to create ellipse gate");
+                          }
+                        }
+                      }}
+                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "none", fontSize: "0.8rem", cursor: "pointer", background: "#22c55e", color: "white" }}
+                    >
+                      Create ellipse gate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPendingEllipse(null); setDrawMode(true); }}
                       style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "1px solid #6b7280", fontSize: "0.8rem", cursor: "pointer", background: "transparent", color: "#9ca3af" }}
                     >
                       Cancel
@@ -3542,7 +3623,7 @@ export const App: React.FC = () => {
                   const y = 1 - yDown;
                   if (gateTool === "interval") {
                     setDrawingInterval({ startX: x, endX: x });
-                  } else if (gateTool === "rectangle") {
+                  } else if (gateTool === "rectangle" || gateTool === "ellipse") {
                     setDrawingRect({ startX: x, startY: y, endX: x, endY: y });
                   } else if (gateTool === "polygon") {
                     setDrawingPolygon((prev) => ({
@@ -3658,10 +3739,28 @@ export const App: React.FC = () => {
                     setDrawingRect(null);
                     setDrawMode(false);
                   }
+                  if (gateTool === "ellipse" && drawingRect) {
+                    const nxMin = Math.min(drawingRect.startX, drawingRect.endX);
+                    const nxMax = Math.max(drawingRect.startX, drawingRect.endX);
+                    const nyMin = Math.min(drawingRect.startY, drawingRect.endY);
+                    const nyMax = Math.max(drawingRect.startY, drawingRect.endY);
+                    if (nxMax - nxMin > 0.01 && nyMax - nyMin > 0.01) {
+                      setPendingEllipse({
+                        nCx: (nxMin + nxMax) / 2,
+                        nCy: (nyMin + nyMax) / 2,
+                        nRx: (nxMax - nxMin) / 2,
+                        nRy: (nyMax - nyMin) / 2,
+                        gateName: "",
+                      });
+                    }
+                    setDrawingRect(null);
+                    setDrawMode(false);
+                  }
                 }}
               />
             )}
             <svg
+              ref={plotSvgRef}
               viewBox={`0 0 ${plotW} ${plotH}`}
               style={{
                 display: "block",
@@ -3860,6 +3959,35 @@ export const App: React.FC = () => {
                     );
                   }
 
+                  if (g.type === "ellipse" &&
+                      g.center_x != null && g.center_y != null &&
+                      g.radius_x != null && g.radius_y != null) {
+                    const cxS = toSvgX(g.center_x);
+                    const cyS = toSvgY(g.center_y);
+                    const rxS = Math.abs(plotAreaW * (g.radius_x / spanX));
+                    const ryS = Math.abs(plotAreaH * (g.radius_y / spanY));
+                    const ang = g.angle ?? 0;
+                    // Label above the ellipse top
+                    const labelX = Math.max(ml + 2, Math.min(ml + plotAreaW - 4, cxS - label.length * 2.8));
+                    const labelY = Math.max(mt + 10, cyS - ryS - 4);
+                    return (
+                      <g key={g.id}>
+                        <ellipse
+                          cx={cxS} cy={cyS} rx={rxS} ry={ryS}
+                          transform={ang !== 0 ? `rotate(${ang}, ${cxS}, ${cyS})` : undefined}
+                          fill={fillAlpha} stroke={color} strokeWidth={1.4} strokeDasharray="5 2"
+                          style={{ cursor: "default", pointerEvents: "none" }}
+                        />
+                        <rect x={labelX - 2} y={labelY - 9} width={label.length * 5.6 + 6} height={12}
+                          rx={3} fill="rgba(15,23,42,0.72)" style={{ pointerEvents: "none" }} />
+                        <text x={labelX} y={labelY} fill={color} fontSize={9.5} fontWeight={600}
+                          dominantBaseline="auto" style={{ userSelect: "none", pointerEvents: "none" }}>
+                          {label}
+                        </text>
+                      </g>
+                    );
+                  }
+
                   if (g.type === "polygon" && g.vertices && g.vertices.length >= 3) {
                     // Use preview vertices if a drag is in progress, otherwise use stored vertices
                     const displayVerts = pvPoly?.vertices ?? g.vertices;
@@ -4031,17 +4159,25 @@ export const App: React.FC = () => {
                   strokeWidth={1.2}
                 />
               )}
-              {drawingRect && (
-                <rect
-                  x={ml + plotAreaW * Math.min(drawingRect.startX, drawingRect.endX)}
-                  y={mt + plotAreaH * (1 - Math.max(drawingRect.startY, drawingRect.endY))}
-                  width={plotAreaW * Math.abs(drawingRect.endX - drawingRect.startX)}
-                  height={plotAreaH * Math.abs(drawingRect.endY - drawingRect.startY)}
-                  fill="rgba(74,222,128,0.15)"
-                  stroke="#4ade80"
-                  strokeWidth={1.5}
-                />
-              )}
+              {drawingRect && (() => {
+                const dLeft = ml + plotAreaW * Math.min(drawingRect.startX, drawingRect.endX);
+                const dTop  = mt + plotAreaH * (1 - Math.max(drawingRect.startY, drawingRect.endY));
+                const dW    = plotAreaW * Math.abs(drawingRect.endX - drawingRect.startX);
+                const dH    = plotAreaH * Math.abs(drawingRect.endY - drawingRect.startY);
+                if (gateTool === "ellipse") {
+                  return (
+                    <ellipse
+                      cx={dLeft + dW / 2} cy={dTop + dH / 2}
+                      rx={Math.max(0, dW / 2)} ry={Math.max(0, dH / 2)}
+                      fill="rgba(74,222,128,0.15)" stroke="#4ade80" strokeWidth={1.5}
+                    />
+                  );
+                }
+                return (
+                  <rect x={dLeft} y={dTop} width={dW} height={dH}
+                    fill="rgba(74,222,128,0.15)" stroke="#4ade80" strokeWidth={1.5} />
+                );
+              })()}
               {plotMode === "points" && points.length === 0 && (
                 <text
                   x={plotW / 2}
@@ -4062,6 +4198,70 @@ export const App: React.FC = () => {
             </svg>
             </div>
           </div>
+          {/* N: Plot PNG export button */}
+          {file && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.3rem" }}>
+              <button
+                type="button"
+                title="Export plot as PNG"
+                onClick={async () => {
+                  const svgEl = plotSvgRef.current;
+                  if (!svgEl) return;
+                  const container = svgEl.parentElement?.parentElement;
+                  const w = svgEl.clientWidth || 800;
+                  const h = svgEl.clientHeight || 600;
+                  const offscreen = document.createElement("canvas");
+                  offscreen.width = w * 2;
+                  offscreen.height = h * 2;
+                  const ctx = offscreen.getContext("2d");
+                  if (!ctx) return;
+                  ctx.scale(2, 2);
+                  // Background
+                  ctx.fillStyle = plotBgMode === "white" ? "#ffffff" : "#0f172a";
+                  ctx.fillRect(0, 0, w, h);
+                  // Composite canvas layers (density / scatter)
+                  if (container) {
+                    const svgRect = svgEl.getBoundingClientRect();
+                    container.querySelectorAll("canvas").forEach((c) => {
+                      const cr = c.getBoundingClientRect();
+                      ctx.drawImage(c, cr.left - svgRect.left, cr.top - svgRect.top, cr.width, cr.height);
+                    });
+                  }
+                  // Draw SVG on top
+                  const svgStr = new XMLSerializer().serializeToString(svgEl);
+                  const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+                  const svgUrl = URL.createObjectURL(blob);
+                  await new Promise<void>((resolve) => {
+                    const img = new Image();
+                    img.onload = () => { ctx.drawImage(img, 0, 0, w, h); URL.revokeObjectURL(svgUrl); resolve(); };
+                    img.onerror = () => { URL.revokeObjectURL(svgUrl); resolve(); };
+                    img.src = svgUrl;
+                  });
+                  offscreen.toBlob((b) => {
+                    if (!b) return;
+                    const url = URL.createObjectURL(b);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    const fname = file?.sample_name ?? "plot";
+                    a.download = `freecyto_${fname.replace(/[^a-zA-Z0-9_-]/g, "_")}.png`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }, "image/png");
+                }}
+                style={{
+                  padding: "0.2rem 0.55rem",
+                  borderRadius: "0.35rem",
+                  border: "1px solid rgba(148,163,184,0.4)",
+                  background: "transparent",
+                  color: "#94a3b8",
+                  fontSize: "0.72rem",
+                  cursor: "pointer",
+                }}
+              >
+                📷 PNG
+              </button>
+            </div>
+          )}
 
           {/* M: Histogram overlay panel — visible only in histogram mode */}
           {file && plotMode === "histogram" && (

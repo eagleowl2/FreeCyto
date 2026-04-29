@@ -1,0 +1,13 @@
+{
+  "name": "freecyto-root",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev":          "npm run dev          --prefix frontend",
+    "dev:frontend": "npm run dev:frontend --prefix frontend",
+    "dev:backend":  "npm run dev:backend  --prefix frontend",
+    "build":        "npm run build        --prefix frontend",
+    "test":         "npm run test         --prefix frontend",
+    "preview":      "npm run preview      --prefix frontend"
+  }
+}

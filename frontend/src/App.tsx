@@ -179,6 +179,12 @@ export const App: React.FC = () => {
   const [applyGatesTargets, setApplyGatesTargets] = React.useState<Set<string>>(new Set());
   const [applyGatesLoading, setApplyGatesLoading] = React.useState(false);
   const [applyGatesMessage, setApplyGatesMessage] = React.useState<string>("");
+
+  // Q-2: Population summary report
+  type PopulationSortCol = "name" | "count" | "pct_parent" | "pct_total";
+  const [popSortCol, setPopSortCol] = React.useState<PopulationSortCol>("name");
+  const [popSortDir, setPopSortDir] = React.useState<"asc" | "desc">("asc");
+  const [popExpanded, setPopExpanded] = React.useState(false);
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
     () =>
@@ -5327,6 +5333,202 @@ export const App: React.FC = () => {
                   )}
                 </div>
               )}
+
+          {/* Q-2: Populations summary report */}
+          {file && (
+            <div
+              style={{
+                marginTop: "1rem",
+                borderRadius: "0.75rem",
+                overflow: "hidden",
+                border: "1px solid rgba(100,116,139,0.35)",
+                background: "rgba(15,23,42,0.5)",
+              }}
+            >
+              {/* Panel header / toggle */}
+              <button
+                type="button"
+                onClick={() => setPopExpanded((x) => !x)}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "0.5rem 0.85rem",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#e5e7eb",
+                  fontSize: "0.78rem",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#9ca3af", fontWeight: 600 }}>
+                  Populations ({gateList.length})
+                </span>
+                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{popExpanded ? "▲" : "▼"}</span>
+              </button>
+
+              {popExpanded && (
+                <div style={{ padding: "0 0.85rem 0.75rem" }}>
+                  {gateList.length === 0 ? (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                      No gates yet — draw gates to see population summary.
+                    </div>
+                  ) : (
+                    (() => {
+                      // Sort gates by active column
+                      const sorted = [...gateList].sort((a, b) => {
+                        let va: number | string;
+                        let vb: number | string;
+                        if (popSortCol === "name") {
+                          va = a.name.toLowerCase();
+                          vb = b.name.toLowerCase();
+                        } else if (popSortCol === "count") {
+                          va = a.count;
+                          vb = b.count;
+                        } else if (popSortCol === "pct_parent") {
+                          va = a.pct_of_parent ?? 0;
+                          vb = b.pct_of_parent ?? 0;
+                        } else {
+                          va = a.pct_of_total ?? 0;
+                          vb = b.pct_of_total ?? 0;
+                        }
+                        const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+                        return popSortDir === "asc" ? cmp : -cmp;
+                      });
+
+                      const handleHeaderClick = (col: PopulationSortCol) => {
+                        if (popSortCol === col) {
+                          setPopSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                        } else {
+                          setPopSortCol(col);
+                          setPopSortDir("desc");
+                        }
+                      };
+
+                      const sortIcon = (col: PopulationSortCol) =>
+                        popSortCol === col ? (popSortDir === "asc" ? " ▲" : " ▼") : "";
+
+                      const handleExport = () => {
+                        const header = ["Gate", "Count", "% Parent", "% Total"].join("\t");
+                        const rows = sorted.map((g) =>
+                          [g.name, g.count, (g.pct_of_parent ?? 0).toFixed(1), (g.pct_of_total ?? 0).toFixed(1)].join("\t"),
+                        );
+                        void navigator.clipboard.writeText([header, ...rows].join("\n"));
+                      };
+
+                      return (
+                        <>
+                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.25rem", gap: "0.5rem" }}>
+                            <button
+                              type="button"
+                              onClick={handleExport}
+                              title="Copy to clipboard (tab-separated)"
+                              style={{
+                                padding: "0.15rem 0.45rem",
+                                borderRadius: "0.35rem",
+                                border: "1px solid rgba(148,163,184,0.35)",
+                                background: "transparent",
+                                color: "#94a3b8",
+                                fontSize: "0.72rem",
+                                cursor: "pointer",
+                              }}
+                            >
+                              📋 Copy
+                            </button>
+                          </div>
+                          <div style={{ overflowX: "auto", fontSize: "0.75rem" }}>
+                            <table
+                              style={{
+                                width: "100%",
+                                borderCollapse: "collapse",
+                                color: "#e5e7eb",
+                              }}
+                            >
+                              <thead>
+                                <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
+                                  {(["Gate", "Count", "% Parent", "% Total"] as const).map((label, idx) => {
+                                    const col: PopulationSortCol = ["name", "count", "pct_parent", "pct_total"][idx] as PopulationSortCol;
+                                    return (
+                                      <th
+                                        key={label}
+                                        onClick={() => handleHeaderClick(col)}
+                                        style={{
+                                          padding: "0.25rem 0.4rem",
+                                          textAlign: label === "Gate" ? "left" : "right",
+                                          color: popSortCol === col ? "#c4b5fd" : "#9ca3af",
+                                          fontWeight: popSortCol === col ? 600 : 500,
+                                          whiteSpace: "nowrap",
+                                          cursor: "pointer",
+                                          userSelect: "none",
+                                        }}
+                                      >
+                                        {label}{sortIcon(col)}
+                                      </th>
+                                    );
+                                  })}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sorted.map((g, i) => (
+                                  <tr
+                                    key={g.id}
+                                    onClick={() => {
+                                      setActiveGateId(g.id);
+                                      setDrawMode(false);
+                                      setPendingGate(null);
+                                      setDrawingPolygon(null);
+                                      setDrawingRect(null);
+                                    }}
+                                    style={{
+                                      background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
+                                      cursor: "pointer",
+                                      opacity: activeGateId === g.id ? 1 : 0.7,
+                                    }}
+                                  >
+                                    <td
+                                      style={{
+                                        padding: "0.2rem 0.4rem",
+                                        color: activeGateId === g.id ? "#c4b5fd" : "#cbd5e1",
+                                        maxWidth: "10rem",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                        fontWeight: activeGateId === g.id ? 500 : 400,
+                                      }}
+                                      title={g.name}
+                                    >
+                                      {g.name}
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "0.2rem 0.4rem",
+                                        textAlign: "right",
+                                        fontVariantNumeric: "tabular-nums",
+                                      }}
+                                    >
+                                      {g.count.toLocaleString()}
+                                    </td>
+                                    <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                      {(g.pct_of_parent ?? 0).toFixed(1)}%
+                                    </td>
+                                    <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                      {(g.pct_of_total ?? 0).toFixed(1)}%
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+            </div>
+          )}
             </div>
           )}
         </div>

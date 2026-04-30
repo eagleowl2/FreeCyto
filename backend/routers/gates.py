@@ -215,6 +215,28 @@ async def export_gate_fcs(gate_id: str) -> StreamingResponse:
   )
 
 
+@router.get("/{gate_id}/export-csv")
+async def export_gate_csv(
+  gate_id: str,
+  max_events: int = Query(0, ge=0, description="Max events to export; 0 = no limit (full gate)"),
+) -> StreamingResponse:
+  """Download gated events as a CSV file.
+
+  Columns are the raw (untransformed) channel values in display-name order.
+  The first row is a header; subsequent rows are one event per line.
+  """
+  try:
+    rows, filename, _count = gates_service.export_gate_csv_stream(gate_id, max_events=max_events)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  safe_filename = filename.replace('"', "")
+  return StreamingResponse(
+    rows,
+    media_type="text/csv",
+    headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+  )
+
+
 @router.delete("/{gate_id}")
 async def delete_gate(gate_id: str) -> dict:
   """Delete a gate and all its descendants. Returns deleted_ids."""

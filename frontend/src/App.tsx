@@ -166,6 +166,10 @@ export const App: React.FC = () => {
   const [gateStats, setGateStats] = React.useState<GateStatsData | null>(null);
   const [gateStatsLoading, setGateStatsLoading] = React.useState(false);
   const [statsExpanded, setStatsExpanded] = React.useState(false);
+  // P-3: column sort for stats table
+  type StatsSortCol = "channel" | "mean" | "median" | "sd" | "cv";
+  const [statsSortCol, setStatsSortCol] = React.useState<StatsSortCol>("channel");
+  const [statsSortDir, setStatsSortDir] = React.useState<"asc" | "desc">("asc");
   const gateList = React.useMemo(() => flattenTree(gateTree), [gateTree]);
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
@@ -4913,6 +4917,27 @@ export const App: React.FC = () => {
                         >
                           Export CSV
                         </button>
+                        {/* P-1: Export gated events as CSV */}
+                        {activeGateId && (
+                          <a
+                            href={`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/export-csv`}
+                            download
+                            title={gateStats ? `Download ${gateStats.count.toLocaleString()} events as CSV` : "Download events as CSV"}
+                            style={{
+                              padding: "0.2rem 0.55rem",
+                              borderRadius: "0.4rem",
+                              border: "1px solid rgba(96,165,250,0.45)",
+                              fontSize: "0.75rem",
+                              cursor: "pointer",
+                              background: "rgba(96,165,250,0.1)",
+                              color: "#60a5fa",
+                              textDecoration: "none",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ↓ Events CSV{gateStats ? ` (${gateStats.count.toLocaleString()})` : ""}
+                          </a>
+                        )}
                         {/* M: Export gated events as FCS */}
                         {activeGateId && (
                           <a
@@ -4934,72 +4959,149 @@ export const App: React.FC = () => {
                           </a>
                         )}
                       </div>
-                      {/* Stats table */}
-                      <div style={{ overflowX: "auto" }}>
-                        <table
-                          style={{
-                            width: "100%",
-                            borderCollapse: "collapse",
-                            fontSize: "0.75rem",
-                            color: "#e5e7eb",
-                          }}
-                        >
-                          <thead>
-                            <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
-                              {["Channel", "MFI", "Median", "SD", "CV%"].map((h) => (
-                                <th
-                                  key={h}
-                                  style={{
-                                    padding: "0.25rem 0.4rem",
-                                    textAlign: h === "Channel" ? "left" : "right",
-                                    color: "#9ca3af",
-                                    fontWeight: 500,
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {h}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {gateStats.channel_stats.map((cs, i) => (
-                              <tr
-                                key={cs.channel_name}
+                      {/* P-3: Stats table — sortable columns + clipboard copy */}
+                      {(() => {
+                        // Sort channel_stats by the active column
+                        const colKey: StatsSortCol = statsSortCol;
+                        const sorted = [...gateStats.channel_stats].sort((a, b) => {
+                          let va: number | string;
+                          let vb: number | string;
+                          if (colKey === "channel") {
+                            va = (a.display_name || a.channel_name).toLowerCase();
+                            vb = (b.display_name || b.channel_name).toLowerCase();
+                          } else if (colKey === "mean") { va = a.mean; vb = b.mean; }
+                          else if (colKey === "median") { va = a.median; vb = b.median; }
+                          else if (colKey === "sd") { va = a.sd; vb = b.sd; }
+                          else { va = a.cv ?? -Infinity; vb = b.cv ?? -Infinity; }
+                          const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+                          return statsSortDir === "asc" ? cmp : -cmp;
+                        });
+
+                        const handleHeaderClick = (col: StatsSortCol) => {
+                          if (statsSortCol === col) {
+                            setStatsSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                          } else {
+                            setStatsSortCol(col);
+                            setStatsSortDir(col === "channel" ? "asc" : "desc");
+                          }
+                        };
+
+                        const sortIcon = (col: StatsSortCol) =>
+                          statsSortCol === col ? (statsSortDir === "asc" ? " ▲" : " ▼") : "";
+
+                        const headers: { label: string; col: StatsSortCol; align: "left" | "right" }[] = [
+                          { label: "Channel", col: "channel", align: "left" },
+                          { label: "MFI", col: "mean", align: "right" },
+                          { label: "Median", col: "median", align: "right" },
+                          { label: "SD", col: "sd", align: "right" },
+                          { label: "CV%", col: "cv", align: "right" },
+                        ];
+
+                        const handleCopy = () => {
+                          const headerRow = headers.map((h) => h.label).join("\t");
+                          const dataRows = sorted.map((cs) =>
+                            [
+                              cs.display_name || cs.channel_name,
+                              cs.mean.toFixed(2),
+                              cs.median.toFixed(2),
+                              cs.sd.toFixed(2),
+                              cs.cv != null ? cs.cv.toFixed(2) : "",
+                            ].join("\t"),
+                          );
+                          void navigator.clipboard.writeText([headerRow, ...dataRows].join("\n"));
+                        };
+
+                        return (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.25rem" }}>
+                              <button
+                                type="button"
+                                onClick={handleCopy}
+                                title="Copy table to clipboard (tab-separated)"
                                 style={{
-                                  background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
+                                  padding: "0.15rem 0.45rem",
+                                  borderRadius: "0.35rem",
+                                  border: "1px solid rgba(148,163,184,0.35)",
+                                  background: "transparent",
+                                  color: "#94a3b8",
+                                  fontSize: "0.72rem",
+                                  cursor: "pointer",
                                 }}
                               >
-                                <td
-                                  style={{
-                                    padding: "0.2rem 0.4rem",
-                                    color: "#cbd5e1",
-                                    maxWidth: "12rem",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  title={cs.display_name || cs.channel_name}
-                                >
-                                  {cs.display_name || cs.channel_name}
-                                </td>
-                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                  {cs.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                                </td>
-                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                  {cs.median.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                                </td>
-                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                  {cs.sd.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                                </td>
-                                <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: cs.cv != null && cs.cv > 100 ? "#fbbf24" : "#e5e7eb" }}>
-                                  {cs.cv != null ? cs.cv.toFixed(1) : "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                                📋 Copy
+                              </button>
+                            </div>
+                            <div style={{ overflowX: "auto" }}>
+                              <table
+                                style={{
+                                  width: "100%",
+                                  borderCollapse: "collapse",
+                                  fontSize: "0.75rem",
+                                  color: "#e5e7eb",
+                                }}
+                              >
+                                <thead>
+                                  <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
+                                    {headers.map(({ label, col, align }) => (
+                                      <th
+                                        key={col}
+                                        onClick={() => handleHeaderClick(col)}
+                                        style={{
+                                          padding: "0.25rem 0.4rem",
+                                          textAlign: align,
+                                          color: statsSortCol === col ? "#c4b5fd" : "#9ca3af",
+                                          fontWeight: statsSortCol === col ? 600 : 500,
+                                          whiteSpace: "nowrap",
+                                          cursor: "pointer",
+                                          userSelect: "none",
+                                        }}
+                                      >
+                                        {label}{sortIcon(col)}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {sorted.map((cs, i) => (
+                                    <tr
+                                      key={cs.channel_name}
+                                      style={{
+                                        background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
+                                      }}
+                                    >
+                                      <td
+                                        style={{
+                                          padding: "0.2rem 0.4rem",
+                                          color: "#cbd5e1",
+                                          maxWidth: "12rem",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                        title={cs.display_name || cs.channel_name}
+                                      >
+                                        {cs.display_name || cs.channel_name}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                        {cs.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                        {cs.median.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                        {cs.sd.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: cs.cv != null && cs.cv > 100 ? "#fbbf24" : "#e5e7eb" }}>
+                                        {cs.cv != null ? cs.cv.toFixed(1) : "—"}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </>
                   )}
                 </div>

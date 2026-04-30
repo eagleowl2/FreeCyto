@@ -11,6 +11,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from collections.abc import Iterator
 from typing import Any
 import numpy as np
 
@@ -1144,3 +1145,55 @@ def delete_all_gates_for_file(file_id: str) -> None:
   for gid in list(_store.root_children.get(file_id, [])):
     _evict_gate_subtree(gid)
   _store.root_children.pop(file_id, None)
+
+
+# P-1: gate population CSV export
+
+
+def export_gate_csv_stream(
+  gate_id: str,
+  max_events: int = 0,
+) -> tuple[Iterator[str], str, int]:
+  """Stream CSV rows for all raw events inside a gate population.
+
+  Args:
+    gate_id:    Gate to export.
+    max_events: Maximum number of events to include; 0 = no limit (full gate).
+
+  Returns:
+    (row_generator, filename, count)
+    - *row_generator* yields the header line then one data line per event.
+    - *filename* is a safe download name derived from the gate name.
+    - *count* is the number of data rows (after optional down-sampling).
+
+  Raises:
+    KeyError: gate not found.
+  """
+  _cleanup_expired_suspended_files()
+  record = _store.gates_by_id.get(gate_id)
+  if record is None:
+    raise KeyError(f"Gate {gate_id!r} not found")
+
+  mask = _get_mask(record)
+  raw_events = storage.get_file_events(record.file_id)
+  metadata = storage.get_file_metadata(record.file_id)
+
+  gate_events = raw_events[mask]
+  if max_events > 0 and gate_events.shape[0] > max_events:
+    idx = np.random.choice(gate_events.shape[0], size=max_events, replace=False)
+    gate_events = gate_events[np.sort(idx)]
+
+  count = int(gate_events.shape[0])
+  col_names = [ch.display_name or ch.name for ch in metadata.channels]
+  safe_name = record.name.replace('"', "").replace("/", "_").replace("\\", "_").strip() or "gate"
+  filename = f"{safe_name}_events.csv"
+
+  # Capture as float64 array now so the generator doesn't hold a reference to the memmap
+  data = gate_events.astype(np.float64)
+
+  def _rows() -> Iterator[str]:
+    yield ",".join(col_names) + "\n"
+    for row in data:
+      yield ",".join(f"{v:.6g}" for v in row) + "\n"
+
+  return _rows(), filename, count

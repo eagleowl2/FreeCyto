@@ -447,6 +447,23 @@ async def delete_file(file_id: str) -> dict:
   return {"status": "deleted", "file_id": file_id}
 
 
+# Q-1: Batch gate copy
+
+
+@router.get("/list")
+async def list_files() -> list[FileMetadata]:
+  """List all currently loaded files."""
+  file_ids = storage.list_loaded_file_ids()
+  result = []
+  for fid in file_ids:
+    try:
+      meta = storage.get_file_metadata(fid)
+      result.append(meta)
+    except KeyError:
+      pass
+  return result
+
+
 @router.get("/cache/status")
 async def cache_status() -> dict:
   """Return basic cache usage information."""

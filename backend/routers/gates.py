@@ -237,6 +237,29 @@ async def export_gate_csv(
   )
 
 
+# Q-1: Batch gate copy
+
+
+@router.post("/copy")
+async def copy_gates(
+  source_file_id: str = Query(..., description="File to copy gate tree from"),
+  target_file_ids: list[str] = Query(..., description="Files to copy gate tree to"),
+) -> dict:
+  """Copy the entire gate tree from one file to one or more target files.
+
+  Creates new gates on target files with the same parameters as the source.
+  Returns counts of gates created per target file.
+  """
+  try:
+    result = gates_service.copy_gates_between_files(source_file_id, target_file_ids)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  _snapshot_session_async()
+  return result
+
+
 @router.delete("/{gate_id}")
 async def delete_gate(gate_id: str) -> dict:
   """Delete a gate and all its descendants. Returns deleted_ids."""

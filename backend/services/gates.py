@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from typing import Any
 import numpy as np
 
-from models.gate_models import BooleanGateCreate, ChannelStats, EllipseGateCreate, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate
+from models.gate_models import BooleanGateCreate, ChannelStats, EllipseGateCreate, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate, PolygonGateCreate, RectangleGateCreate
 from services import storage, transforms as transform_service
 
 
@@ -1197,3 +1197,127 @@ def export_gate_csv_stream(
       yield ",".join(f"{v:.6g}" for v in row) + "\n"
 
   return _rows(), filename, count
+
+
+# Q-1: Batch gate copy
+
+
+def copy_gates_between_files(
+  source_file_id: str,
+  target_file_ids: list[str],
+) -> dict:
+  """Copy the entire gate tree from one file to one or more target files.
+
+  Creates new gates on target files with the same parameters. Preserves parent-child
+  relationships and ordering.
+
+  Returns:
+    {
+      "source_file_id": str,
+      "target_file_ids": [str, ...],
+      "gates_copied": int (per target),
+      "results": { "target_file_id": int count, ... }
+    }
+  """
+  _cleanup_expired_suspended_files()
+
+  # Validate source file has gates
+  source_gates = get_gate_tree(source_file_id)
+  if not source_gates:
+    raise ValueError(f"Source file {source_file_id!r} has no gates to copy")
+
+  # Flatten source tree to get all gates in topological order
+  def flatten_gates(nodes: list[GateResponse]) -> list[GateResponse]:
+    out = []
+    for node in nodes:
+      out.append(node)
+      out.extend(flatten_gates(node.children))
+    return out
+
+  all_source_gates = flatten_gates(source_gates)
+
+  results = {}
+
+  # For each target file
+  for target_file_id in target_file_ids:
+    # Verify target file exists
+    try:
+      storage.get_file_metadata(target_file_id)
+    except KeyError:
+      raise KeyError(f"Target file {target_file_id!r} not found")
+
+    # Map source gate IDs to newly created gate IDs on target
+    id_map: dict[str, str] = {}
+    gates_count = 0
+
+    # Create each gate on target (in topological order, so parents exist before children)
+    for src_gate in all_source_gates:
+      # Look up the mapped parent ID on target (or None if no parent)
+      target_parent_id = id_map.get(src_gate.parent_gate_id) if src_gate.parent_gate_id else None
+
+      # Build create request with source parameters
+      if src_gate.type == "rectangle":
+        params = RectangleGateCreate(
+          type="rectangle",
+          x_min=src_gate.x_min or 0.0,
+          y_min=src_gate.y_min or 0.0,
+          x_max=src_gate.x_max or 1000.0,
+          y_max=src_gate.y_max or 1000.0,
+        )
+      elif src_gate.type == "polygon":
+        params = PolygonGateCreate(
+          type="polygon",
+          vertices=src_gate.vertices or [[0, 0], [100, 0], [50, 100]],
+        )
+      elif src_gate.type == "interval":
+        params = IntervalGateCreate(
+          type="interval",
+          x_min=src_gate.x_min or 0.0,
+          x_max=src_gate.x_max or 1000.0,
+        )
+      elif src_gate.type == "boolean":
+        params = BooleanGateCreate(
+          type="boolean",
+          expression=src_gate.expression or "",
+        )
+      elif src_gate.type == "ellipse":
+        params = EllipseGateCreate(
+          type="ellipse",
+          center_x=src_gate.center_x or 500.0,
+          center_y=src_gate.center_y or 500.0,
+          radius_x=src_gate.radius_x or 100.0,
+          radius_y=src_gate.radius_y or 100.0,
+          angle=src_gate.angle or 0.0,
+        )
+      else:
+        raise ValueError(f"Unknown gate type: {src_gate.type}")
+
+      create_req = GateCreateRequest(
+        file_id=target_file_id,
+        name=src_gate.name,
+        x_channel=src_gate.x_channel,
+        y_channel=src_gate.y_channel,
+        parent_gate_id=target_parent_id,
+        order=src_gate.order,
+        transform_x=src_gate.transform_x,
+        transform_y=src_gate.transform_y,
+        arcsinh_cofactor=src_gate.arcsinh_cofactor,
+        logicle_T=src_gate.logicle_T,
+        logicle_W=src_gate.logicle_W,
+        logicle_M=src_gate.logicle_M,
+        logicle_A=src_gate.logicle_A,
+        params=params,
+      )
+
+      new_gate = create_gate(create_req)
+      id_map[src_gate.id] = new_gate.id
+      gates_count += 1
+
+    results[target_file_id] = gates_count
+
+  return {
+    "source_file_id": source_file_id,
+    "target_file_ids": target_file_ids,
+    "results": results,
+    "total_gates_copied": sum(results.values()),
+  }

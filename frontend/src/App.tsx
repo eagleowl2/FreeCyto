@@ -171,6 +171,14 @@ export const App: React.FC = () => {
   const [statsSortCol, setStatsSortCol] = React.useState<StatsSortCol>("channel");
   const [statsSortDir, setStatsSortDir] = React.useState<"asc" | "desc">("asc");
   const gateList = React.useMemo(() => flattenTree(gateTree), [gateTree]);
+
+  // Q-1: Batch gate copy
+  type FileInfo = { id: string; sample_name: string; event_count: number };
+  const [allFiles, setAllFiles] = React.useState<FileInfo[]>([]);
+  const [applyGatesModalOpen, setApplyGatesModalOpen] = React.useState(false);
+  const [applyGatesTargets, setApplyGatesTargets] = React.useState<Set<string>>(new Set());
+  const [applyGatesLoading, setApplyGatesLoading] = React.useState(false);
+  const [applyGatesMessage, setApplyGatesMessage] = React.useState<string>("");
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
     () =>
@@ -1015,6 +1023,13 @@ export const App: React.FC = () => {
       .then((data) => { setGateStats(data); setGateStatsLoading(false); })
       .catch(() => { setGateStats(null); setGateStatsLoading(false); });
   }, [activeGateId, statsExpanded]);
+
+  // Q-1: Fetch all loaded files for batch operations
+  React.useEffect(() => {
+    void getJson<FileInfo[]>(`${API_BASE}/api/files/list`)
+      .then((data) => { setAllFiles(data); })
+      .catch(() => { setAllFiles([]); });
+  }, [file]); // Refresh when file changes
 
   React.useEffect(() => {
     if (file?.id) {
@@ -4759,14 +4774,46 @@ export const App: React.FC = () => {
               >
                 <div
                   style={{
-                    fontSize: "0.75rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: "#9ca3af",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                     marginBottom: "0.4rem",
                   }}
                 >
-                  Gate Hierarchy
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: "#9ca3af",
+                    }}
+                  >
+                    Gate Hierarchy
+                  </div>
+                  {/* Q-1: Apply gates to other samples button */}
+                  {gateTree.length > 0 && allFiles.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApplyGatesTargets(new Set());
+                        setApplyGatesModalOpen(true);
+                        setApplyGatesMessage("");
+                      }}
+                      title="Apply current gate layout to other samples"
+                      style={{
+                        padding: "0.2rem 0.5rem",
+                        borderRadius: "0.3rem",
+                        border: "1px solid rgba(147,51,234,0.4)",
+                        fontSize: "0.68rem",
+                        cursor: "pointer",
+                        background: "rgba(147,51,234,0.1)",
+                        color: "#c084fc",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      ⤵ Apply
+                    </button>
+                  )}
                 </div>
                 <GateTreePanel
                   tree={gateTree}
@@ -4810,6 +4857,180 @@ export const App: React.FC = () => {
                   }}
                   onRenameGate={handleRenameGate}
                 />
+
+                {/* Q-1: Apply gates modal */}
+                {applyGatesModalOpen && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      background: "rgba(0,0,0,0.5)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 9999,
+                    }}
+                    onClick={() => !applyGatesLoading && setApplyGatesModalOpen(false)}
+                  >
+                    <div
+                      style={{
+                        background: "#0f172a",
+                        border: "1px solid rgba(148,163,184,0.3)",
+                        borderRadius: "0.5rem",
+                        padding: "1.5rem",
+                        maxWidth: "400px",
+                        maxHeight: "80vh",
+                        overflowY: "auto",
+                        boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          color: "#e5e7eb",
+                          marginBottom: "1rem",
+                        }}
+                      >
+                        Apply gates to other samples
+                      </div>
+
+                      <div style={{ marginBottom: "1rem", fontSize: "0.8rem", color: "#9ca3af" }}>
+                        Select samples to receive the current gate layout ({gateTree.length} gates):
+                      </div>
+
+                      <div style={{ marginBottom: "1rem", maxHeight: "300px", overflowY: "auto" }}>
+                        {allFiles.filter((f) => f.id !== file?.id).map((f) => (
+                          <label
+                            key={f.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                              padding: "0.5rem 0.4rem",
+                              cursor: "pointer",
+                              fontSize: "0.8rem",
+                              color: "#cbd5e1",
+                              borderRadius: "0.3rem",
+                              background: applyGatesTargets.has(f.id) ? "rgba(147,51,234,0.15)" : "transparent",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={applyGatesTargets.has(f.id)}
+                              onChange={(e) => {
+                                const newTargets = new Set(applyGatesTargets);
+                                if (e.target.checked) {
+                                  newTargets.add(f.id);
+                                } else {
+                                  newTargets.delete(f.id);
+                                }
+                                setApplyGatesTargets(newTargets);
+                              }}
+                              style={{ cursor: "pointer" }}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 500 }}>{f.sample_name}</div>
+                              <div style={{ fontSize: "0.7rem", color: "#6b7280" }}>
+                                {f.event_count.toLocaleString()} events
+                              </div>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+
+                      {applyGatesMessage && (
+                        <div
+                          style={{
+                            marginBottom: "1rem",
+                            padding: "0.5rem 0.4rem",
+                            borderRadius: "0.3rem",
+                            fontSize: "0.75rem",
+                            backgroundColor: applyGatesMessage.includes("Error") ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
+                            color: applyGatesMessage.includes("Error") ? "#fca5a5" : "#86efac",
+                          }}
+                        >
+                          {applyGatesMessage}
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setApplyGatesModalOpen(false)}
+                          disabled={applyGatesLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(148,163,184,0.3)",
+                            background: "transparent",
+                            color: "#94a3b8",
+                            fontSize: "0.8rem",
+                            cursor: "pointer",
+                            opacity: applyGatesLoading ? 0.5 : 1,
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (applyGatesTargets.size === 0) {
+                              setApplyGatesMessage("Select at least one sample");
+                              return;
+                            }
+                            setApplyGatesLoading(true);
+                            setApplyGatesMessage("");
+                            try {
+                              const targetIds = Array.from(applyGatesTargets);
+                              const params = new URLSearchParams({
+                                source_file_id: file!.id,
+                              });
+                              targetIds.forEach((id) => params.append("target_file_ids", id));
+                              const res = await fetch(`${API_BASE}/api/gates/copy?${params}`, {
+                                method: "POST",
+                              });
+                              if (!res.ok) {
+                                const text = await res.text();
+                                throw new Error(text || `HTTP ${res.status}`);
+                              }
+                              const result = await res.json();
+                              setApplyGatesMessage(
+                                `✓ Applied ${result.total_gates_copied} gates to ${targetIds.length} sample${targetIds.length === 1 ? "" : "s"}`,
+                              );
+                              setTimeout(() => setApplyGatesModalOpen(false), 2000);
+                            } catch (err) {
+                              const message = err instanceof Error ? err.message : String(err);
+                              setApplyGatesMessage(`Error: ${message}`);
+                            } finally {
+                              setApplyGatesLoading(false);
+                            }
+                          }}
+                          disabled={applyGatesTargets.size === 0 || applyGatesLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(147,51,234,0.5)",
+                            background: "rgba(147,51,234,0.2)",
+                            color: "#c084fc",
+                            fontSize: "0.8rem",
+                            cursor: applyGatesTargets.size === 0 || applyGatesLoading ? "not-allowed" : "pointer",
+                            opacity: applyGatesTargets.size === 0 || applyGatesLoading ? 0.5 : 1,
+                          }}
+                        >
+                          {applyGatesLoading ? "Applying..." : "Apply"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

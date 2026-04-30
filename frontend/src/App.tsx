@@ -185,6 +185,14 @@ export const App: React.FC = () => {
   const [popSortCol, setPopSortCol] = React.useState<PopulationSortCol>("name");
   const [popSortDir, setPopSortDir] = React.useState<"asc" | "desc">("asc");
   const [popExpanded, setPopExpanded] = React.useState(false);
+
+  // Q-3: Gate layout save/restore
+  type LayoutInfo = { id: string; name: string; gate_count: number; source_file_id: string };
+  const [savedLayouts, setSavedLayouts] = React.useState<LayoutInfo[]>([]);
+  const [saveLayoutModalOpen, setSaveLayoutModalOpen] = React.useState(false);
+  const [saveLayoutName, setSaveLayoutName] = React.useState("");
+  const [saveLayoutLoading, setSaveLayoutLoading] = React.useState(false);
+  const [loadLayoutLoading, setLoadLayoutLoading] = React.useState(false);
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
     () =>
@@ -1036,6 +1044,13 @@ export const App: React.FC = () => {
       .then((data) => { setAllFiles(data); })
       .catch(() => { setAllFiles([]); });
   }, [file]); // Refresh when file changes
+
+  // Q-3: Fetch saved layouts
+  React.useEffect(() => {
+    void getJson<LayoutInfo[]>(`${API_BASE}/api/layouts`)
+      .then((data) => { setSavedLayouts(data); })
+      .catch(() => { setSavedLayouts([]); });
+  }, []);
 
   React.useEffect(() => {
     if (file?.id) {
@@ -4797,29 +4812,97 @@ export const App: React.FC = () => {
                     Gate Hierarchy
                   </div>
                   {/* Q-1: Apply gates to other samples button */}
-                  {gateTree.length > 0 && allFiles.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setApplyGatesTargets(new Set());
-                        setApplyGatesModalOpen(true);
-                        setApplyGatesMessage("");
-                      }}
-                      title="Apply current gate layout to other samples"
-                      style={{
-                        padding: "0.2rem 0.5rem",
-                        borderRadius: "0.3rem",
-                        border: "1px solid rgba(147,51,234,0.4)",
-                        fontSize: "0.68rem",
-                        cursor: "pointer",
-                        background: "rgba(147,51,234,0.1)",
-                        color: "#c084fc",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      ⤵ Apply
-                    </button>
-                  )}
+                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                    {/* Q-3: Save layout button */}
+                    {gateTree.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSaveLayoutName("");
+                          setSaveLayoutModalOpen(true);
+                        }}
+                        title="Save current gate layout as template"
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(34,197,94,0.4)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(34,197,94,0.1)",
+                          color: "#86efac",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        💾 Save
+                      </button>
+                    )}
+                    {/* Q-3: Load layout dropdown */}
+                    {savedLayouts.length > 0 && (
+                      <select
+                        disabled={loadLayoutLoading}
+                        onChange={async (e) => {
+                          if (!e.target.value || !file) return;
+                          setLoadLayoutLoading(true);
+                          try {
+                            const res = await fetch(
+                              `${API_BASE}/api/layouts/${encodeURIComponent(e.target.value)}/apply?target_file_id=${encodeURIComponent(file.id)}`,
+                              { method: "POST" },
+                            );
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                            const result = await res.json();
+                            setGateMessage(`✓ Applied ${result.gates_applied} gates from "${result.layout_name}"`);
+                            await fetchGateTree(file.id);
+                          } catch (err) {
+                            const msg = err instanceof Error ? err.message : String(err);
+                            setGateMessage(`Error applying layout: ${msg}`);
+                          } finally {
+                            setLoadLayoutLoading(false);
+                            e.target.value = "";
+                          }
+                        }}
+                        style={{
+                          padding: "0.2rem 0.4rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(96,165,250,0.4)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(96,165,250,0.1)",
+                          color: "#60a5fa",
+                          opacity: loadLayoutLoading ? 0.6 : 1,
+                        }}
+                      >
+                        <option value="">📥 Load layout...</option>
+                        {savedLayouts.map((layout) => (
+                          <option key={layout.id} value={layout.id}>
+                            {layout.name} ({layout.gate_count} gates)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {gateTree.length > 0 && allFiles.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setApplyGatesTargets(new Set());
+                          setApplyGatesModalOpen(true);
+                          setApplyGatesMessage("");
+                        }}
+                        title="Apply current gate layout to other samples"
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(147,51,234,0.4)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(147,51,234,0.1)",
+                          color: "#c084fc",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        ⤵ Apply
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <GateTreePanel
                   tree={gateTree}
@@ -5032,6 +5115,162 @@ export const App: React.FC = () => {
                           }}
                         >
                           {applyGatesLoading ? "Applying..." : "Apply"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Q-3: Save layout modal */}
+                {saveLayoutModalOpen && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      background: "rgba(0,0,0,0.5)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 9999,
+                    }}
+                    onClick={() => !saveLayoutLoading && setSaveLayoutModalOpen(false)}
+                  >
+                    <div
+                      style={{
+                        background: "#0f172a",
+                        border: "1px solid rgba(148,163,184,0.3)",
+                        borderRadius: "0.5rem",
+                        padding: "1.5rem",
+                        maxWidth: "400px",
+                        boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          color: "#e5e7eb",
+                          marginBottom: "1rem",
+                        }}
+                      >
+                        Save gate layout as template
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="Layout name (e.g., 'Lymphocyte gating')"
+                        value={saveLayoutName}
+                        onChange={(e) => setSaveLayoutName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && saveLayoutName.trim()) {
+                            void (async () => {
+                              setSaveLayoutLoading(true);
+                              try {
+                                const res = await fetch(`${API_BASE}/api/layouts`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    name: saveLayoutName,
+                                    source_file_id: file!.id,
+                                  }),
+                                });
+                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                                const layout = await res.json();
+                                // Refresh layouts list
+                                const list = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
+                                setSavedLayouts(list);
+                                setSaveLayoutModalOpen(false);
+                                setGateMessage(`✓ Saved layout "${layout.name}"`);
+                              } catch (err) {
+                                const msg = err instanceof Error ? err.message : String(err);
+                                setGateMessage(`Error saving layout: ${msg}`);
+                              } finally {
+                                setSaveLayoutLoading(false);
+                              }
+                            })();
+                          }
+                        }}
+                        style={{
+                          width: "100%",
+                          padding: "0.5rem 0.6rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(148,163,184,0.3)",
+                          background: "rgba(30,41,59,0.8)",
+                          color: "#e5e7eb",
+                          fontSize: "0.85rem",
+                          marginBottom: "1rem",
+                          boxSizing: "border-box",
+                        }}
+                        disabled={saveLayoutLoading}
+                        autoFocus
+                      />
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setSaveLayoutModalOpen(false)}
+                          disabled={saveLayoutLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(148,163,184,0.3)",
+                            background: "transparent",
+                            color: "#94a3b8",
+                            fontSize: "0.8rem",
+                            cursor: "pointer",
+                            opacity: saveLayoutLoading ? 0.5 : 1,
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!saveLayoutName.trim()) return;
+                            setSaveLayoutLoading(true);
+                            try {
+                              const res = await fetch(`${API_BASE}/api/layouts`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  name: saveLayoutName,
+                                  source_file_id: file!.id,
+                                }),
+                              });
+                              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                              const layout = await res.json();
+                              // Refresh layouts list
+                              const list = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
+                              setSavedLayouts(list);
+                              setSaveLayoutModalOpen(false);
+                              setGateMessage(`✓ Saved layout "${layout.name}"`);
+                            } catch (err) {
+                              const msg = err instanceof Error ? err.message : String(err);
+                              setGateMessage(`Error saving layout: ${msg}`);
+                            } finally {
+                              setSaveLayoutLoading(false);
+                            }
+                          }}
+                          disabled={!saveLayoutName.trim() || saveLayoutLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(34,197,94,0.5)",
+                            background: "rgba(34,197,94,0.2)",
+                            color: "#86efac",
+                            fontSize: "0.8rem",
+                            cursor: !saveLayoutName.trim() || saveLayoutLoading ? "not-allowed" : "pointer",
+                            opacity: !saveLayoutName.trim() || saveLayoutLoading ? 0.5 : 1,
+                          }}
+                        >
+                          {saveLayoutLoading ? "Saving..." : "Save"}
                         </button>
                       </div>
                     </div>

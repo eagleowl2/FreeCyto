@@ -5822,131 +5822,146 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {/* Q-4: Compensation matrix modal */}
+          {/* Q-4: Compensation matrix drawer (right-side panel, hidden by default) */}
           {compensationModalOpen && (
             <div
               style={{
                 position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.5)",
+                top: 0,
+                right: 0,
+                bottom: 0,
+                width: "clamp(280px, 35vw, 380px)",
+                background: "#0f172a",
+                border: "1px solid rgba(148,163,184,0.3)",
+                borderLeft: "2px solid rgba(168,85,247,0.5)",
+                borderRight: "none",
+                borderRadius: "0 0 0 0.5rem",
+                boxShadow: "-10px 0 30px rgba(0,0,0,0.6)",
+                zIndex: 9998,
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 9999,
-                backdropFilter: "blur(2px)",
+                flexDirection: "column",
+                overflowY: "auto",
               }}
-              onClick={() => setCompensationModalOpen(false)}
             >
+              {/* Drawer header */}
               <div
                 style={{
-                  background: "#0f172a",
-                  border: "1px solid rgba(148,163,184,0.3)",
-                  borderRadius: "0.5rem",
-                  padding: "clamp(1rem, 3vw, 1.5rem)",
-                  maxWidth: "clamp(280px, 90vw, 650px)",
-                  maxHeight: "min(90vh, 800px)",
-                  overflowY: "auto",
-                  boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
-                  width: "100%",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "1rem",
+                  borderBottom: "1px solid rgba(148,163,184,0.2)",
+                  flexShrink: 0,
                 }}
-                onClick={(e) => e.stopPropagation()}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "1rem",
-                  }}
-                >
-                  <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#e5e7eb" }}>
-                    Compensation Matrix
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setCompensationModalOpen(false)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "#64748b",
-                      fontSize: "1.2rem",
-                      cursor: "pointer",
-                      padding: "0.2rem 0.4rem",
-                    }}
-                  >
-                    ✕
-                  </button>
+                <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e5e7eb" }}>
+                  🔬 Compensation
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setCompensationModalOpen(false)}
+                  title="Close drawer (or press Esc)"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#64748b",
+                    fontSize: "1.3rem",
+                    cursor: "pointer",
+                    padding: "0 0.3rem",
+                    transition: "color 0.2s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#94a3b8")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
+                >
+                  ✕
+                </button>
+              </div>
 
+              {/* Drawer content */}
+              <div style={{ padding: "1rem", overflowY: "auto", flex: 1 }}>
                 {spilloverLoading ? (
-                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>Loading spillover matrix…</div>
+                  <div style={{ fontSize: "0.8rem", color: "#64748b", textAlign: "center", paddingTop: "2rem" }}>
+                    Loading spillover matrix…
+                  </div>
                 ) : spilloverData ? (
                   <>
-                    <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginBottom: "1rem" }}>
-                      Condition number: <span style={{ color: "#cbd5e1", fontWeight: 500 }}>{spilloverData.cond.toFixed(2)}</span>
-                      <span style={{ fontSize: "0.7rem", marginLeft: "0.3rem", color: "#6b7280" }}>
-                        ({spilloverData.cond < 10 ? "✓ good" : spilloverData.cond < 100 ? "⚠ fair" : "✗ poor"})
-                      </span>
+                    <div style={{ fontSize: "0.72rem", color: "#9ca3af", marginBottom: "0.75rem", lineHeight: "1.4" }}>
+                      <div style={{ fontWeight: 500, color: "#cbd5e1", marginBottom: "0.3rem" }}>
+                        Condition: {spilloverData.cond.toFixed(2)}
+                      </div>
+                      <div>
+                        {spilloverData.cond < 10 ? "✓ Good" : spilloverData.cond < 100 ? "⚠ Fair" : "✗ Poor"}
+                      </div>
                     </div>
-                    <div style={{ overflowX: "auto", fontSize: "0.75rem" }}>
+                    <div style={{ overflowX: "auto", fontSize: "0.65rem", marginBottom: "0.75rem" }}>
                       <table
                         style={{
                           width: "100%",
                           borderCollapse: "collapse",
                           color: "#cbd5e1",
+                          minWidth: "240px",
                         }}
                       >
                         <thead>
                           <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.2)" }}>
                             <th
                               style={{
-                                padding: "0.4rem 0.5rem",
+                                padding: "0.3rem 0.3rem",
                                 textAlign: "left",
                                 color: "#9ca3af",
                                 fontWeight: 500,
+                                fontSize: "0.65rem",
                               }}
                             >
-                              Detector
+                              Det
                             </th>
                             {spilloverData.channel_names.map((ch) => (
                               <th
                                 key={ch}
                                 style={{
-                                  padding: "0.4rem 0.5rem",
+                                  padding: "0.3rem 0.25rem",
                                   textAlign: "right",
                                   color: "#9ca3af",
                                   fontWeight: 500,
+                                  fontSize: "0.6rem",
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  maxWidth: "40px",
                                 }}
+                                title={ch}
                               >
-                                {ch}
+                                {ch.substring(0, 2)}
                               </th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
                           {spilloverData.channel_names.map((rowCh, i) => (
-                            <tr key={rowCh} style={{ background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.03)" }}>
-                              <td style={{ padding: "0.3rem 0.5rem", fontWeight: 500 }}>
-                                {rowCh}
+                            <tr key={rowCh} style={{ background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.05)" }}>
+                              <td style={{ padding: "0.25rem 0.3rem", fontWeight: 500, fontSize: "0.6rem", whiteSpace: "nowrap" }}>
+                                {rowCh.substring(0, 3)}
                               </td>
                               {spilloverData.matrix[i].map((val, j) => (
                                 <td
                                   key={`${i}-${j}`}
                                   style={{
-                                    padding: "0.3rem 0.5rem",
+                                    padding: "0.25rem 0.2rem",
                                     textAlign: "right",
                                     fontVariantNumeric: "tabular-nums",
+                                    fontSize: "0.6rem",
                                     color:
                                       i === j
                                         ? "#86efac"
                                         : val > 0.05
                                           ? "#fbbf24"
                                           : val > 0
-                                            ? "#cbd5e1"
+                                            ? "#9ca3af"
                                             : "#4b5563",
                                   }}
+                                  title={`${(val * 100).toFixed(1)}%`}
                                 >
-                                  {(val * 100).toFixed(1)}%
+                                  {(val * 100).toFixed(0)}
                                 </td>
                               ))}
                             </tr>
@@ -5954,18 +5969,34 @@ export const App: React.FC = () => {
                         </tbody>
                       </table>
                     </div>
-                    <div style={{ marginTop: "1rem", fontSize: "0.7rem", color: "#6b7280", fontStyle: "italic" }}>
-                      Diagonal = detector sensitivity • Colors: <span style={{ color: "#86efac" }}>■</span> diagonal,{" "}
-                      <span style={{ color: "#fbbf24" }}>■</span> spillover &gt;5%
+                    <div style={{ fontSize: "0.65rem", color: "#6b7280", lineHeight: "1.3" }}>
+                      <div style={{ marginBottom: "0.4rem" }}>
+                        <span style={{ color: "#86efac", fontWeight: 600 }}>■ Diag</span> = sensitivity
+                      </div>
+                      <div>
+                        <span style={{ color: "#fbbf24", fontWeight: 600 }}>■ Yellow</span> = spillover &gt;5%
+                      </div>
                     </div>
                   </>
                 ) : (
-                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                    No compensation matrix found in this file.
+                  <div style={{ fontSize: "0.8rem", color: "#64748b", textAlign: "center", paddingTop: "2rem" }}>
+                    No compensation matrix in file.
                   </div>
                 )}
               </div>
             </div>
+          )}
+
+          {/* Overlay backdrop for drawer (click to close) */}
+          {compensationModalOpen && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 9997,
+              }}
+              onClick={() => setCompensationModalOpen(false)}
+            />
           )}
         </div>
         </div>

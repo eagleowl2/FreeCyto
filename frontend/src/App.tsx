@@ -193,6 +193,12 @@ export const App: React.FC = () => {
   const [saveLayoutName, setSaveLayoutName] = React.useState("");
   const [saveLayoutLoading, setSaveLayoutLoading] = React.useState(false);
   const [loadLayoutLoading, setLoadLayoutLoading] = React.useState(false);
+
+  // Q-4: Compensation matrix UI
+  type SpilloverData = { file_id: string; channel_names: string[]; matrix: number[][]; cond: number };
+  const [spilloverData, setSpilloverData] = React.useState<SpilloverData | null>(null);
+  const [spilloverLoading, setSpilloverLoading] = React.useState(false);
+  const [spilloverExpanded, setSpilloverExpanded] = React.useState(false);
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
     () =>
@@ -1051,6 +1057,19 @@ export const App: React.FC = () => {
       .then((data) => { setSavedLayouts(data); })
       .catch(() => { setSavedLayouts([]); });
   }, []);
+
+  // Q-4: Fetch compensation matrix when file changes
+  React.useEffect(() => {
+    if (!file) {
+      setSpilloverData(null);
+      return;
+    }
+    if (!spilloverExpanded) return;
+    setSpilloverLoading(true);
+    void getJson<SpilloverData>(`${API_BASE}/api/compensation/spillover/${encodeURIComponent(file.id)}`)
+      .then((data) => { setSpilloverData(data); setSpilloverLoading(false); })
+      .catch(() => { setSpilloverData(null); setSpilloverLoading(false); });
+  }, [file, spilloverExpanded]);
 
   React.useEffect(() => {
     if (file?.id) {
@@ -5768,6 +5787,159 @@ export const App: React.FC = () => {
               )}
             </div>
           )}
+            </div>
+          )}
+
+          {/* Q-4: Compensation matrix panel */}
+          {file && (
+            <div
+              style={{
+                marginTop: "1rem",
+                borderRadius: "0.75rem",
+                overflow: "hidden",
+                border: "1px solid rgba(100,116,139,0.35)",
+                background: "rgba(15,23,42,0.5)",
+              }}
+            >
+              {/* Panel header / toggle */}
+              <button
+                type="button"
+                onClick={() => setSpilloverExpanded((x) => !x)}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "0.5rem 0.85rem",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#e5e7eb",
+                  fontSize: "0.78rem",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#9ca3af", fontWeight: 600 }}>
+                  Compensation
+                </span>
+                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{spilloverExpanded ? "▲" : "▼"}</span>
+              </button>
+
+              {spilloverExpanded && (
+                <div style={{ padding: "0 0.85rem 0.75rem" }}>
+                  {spilloverLoading ? (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>Loading spillover matrix…</div>
+                  ) : spilloverData ? (
+                    <>
+                      <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginBottom: "0.5rem" }}>
+                        Condition number: <span style={{ color: "#cbd5e1", fontWeight: 500 }}>{spilloverData.cond.toFixed(2)}</span>
+                        <span style={{ fontSize: "0.7rem", marginLeft: "0.3rem", color: "#6b7280" }}>
+                          ({spilloverData.cond < 10 ? "✓ good" : spilloverData.cond < 100 ? "⚠ fair" : "✗ poor"})
+                        </span>
+                      </div>
+                      <div style={{ overflowX: "auto", fontSize: "0.7rem" }}>
+                        <table
+                          style={{
+                            width: "100%",
+                            borderCollapse: "collapse",
+                            color: "#cbd5e1",
+                            minWidth: "300px",
+                          }}
+                        >
+                          <thead>
+                            <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.2)" }}>
+                              <th
+                                style={{
+                                  padding: "0.25rem 0.3rem",
+                                  textAlign: "left",
+                                  color: "#9ca3af",
+                                  fontWeight: 500,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Detector
+                              </th>
+                              {spilloverData.channel_names.map((ch) => (
+                                <th
+                                  key={ch}
+                                  style={{
+                                    padding: "0.25rem 0.3rem",
+                                    textAlign: "right",
+                                    color: "#9ca3af",
+                                    fontWeight: 500,
+                                    whiteSpace: "nowrap",
+                                    fontSize: "0.65rem",
+                                  }}
+                                >
+                                  {ch}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {spilloverData.channel_names.map((rowCh, i) => (
+                              <tr
+                                key={rowCh}
+                                style={{
+                                  background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.03)",
+                                }}
+                              >
+                                <td
+                                  style={{
+                                    padding: "0.2rem 0.3rem",
+                                    textAlign: "left",
+                                    fontWeight: i === 0 ? 500 : 400,
+                                    whiteSpace: "nowrap",
+                                    fontSize: "0.65rem",
+                                  }}
+                                >
+                                  {rowCh}
+                                </td>
+                                {spilloverData.matrix[i].map((val, j) => (
+                                  <td
+                                    key={`${i}-${j}`}
+                                    style={{
+                                      padding: "0.2rem 0.3rem",
+                                      textAlign: "right",
+                                      fontVariantNumeric: "tabular-nums",
+                                      fontSize: "0.65rem",
+                                      color:
+                                        i === j
+                                          ? "#86efac"
+                                          : val > 0.05
+                                            ? "#fbbf24"
+                                            : val > 0
+                                              ? "#cbd5e1"
+                                              : "#4b5563",
+                                    }}
+                                  >
+                                    {(val * 100).toFixed(1)}%
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div
+                        style={{
+                          marginTop: "0.5rem",
+                          fontSize: "0.7rem",
+                          color: "#6b7280",
+                          fontStyle: "italic",
+                        }}
+                      >
+                        Diagonal = detector sensitivity • Colors: <span style={{ color: "#86efac" }}>■</span> diagonal,{" "}
+                        <span style={{ color: "#fbbf24" }}>■</span> spillover &gt;5%
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                      No compensation matrix found in this file.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

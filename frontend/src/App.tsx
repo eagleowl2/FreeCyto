@@ -1067,6 +1067,18 @@ export const App: React.FC = () => {
       .catch(() => { setSpilloverData(null); setSpilloverLoading(false); });
   }, [file, compensationModalOpen]);
 
+  // Polishment 4: Keyboard shortcuts - Esc to close modals
+  React.useEffect(() => {
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (compensationModalOpen) setCompensationModalOpen(false);
+        else if (saveLayoutModalOpen) setSaveLayoutModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleEscKey);
+    return () => window.removeEventListener("keydown", handleEscKey);
+  }, [compensationModalOpen, saveLayoutModalOpen]);
+
   React.useEffect(() => {
     if (file?.id) {
       void fetchGateTree(file.id);
@@ -1489,11 +1501,11 @@ export const App: React.FC = () => {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(260px, 320px) minmax(0, 1fr)",
-              gap: "clamp(1rem, 2vw, 2.25rem)",
+              gridTemplateColumns: "minmax(240px, 280px) minmax(0, 1fr)",
+              gap: "clamp(0.75rem, 2vw, 2rem)",
               alignItems: "start",
               width: "100%",
-              maxWidth: "min(1200px, 100%)",
+              maxWidth: "min(1320px, 100%)",
               margin: "0 auto",
             }}
           >
@@ -4993,6 +5005,7 @@ export const App: React.FC = () => {
                       alignItems: "center",
                       justifyContent: "center",
                       zIndex: 9999,
+                      backdropFilter: "blur(2px)",
                     }}
                     onClick={() => !applyGatesLoading && setApplyGatesModalOpen(false)}
                   >
@@ -5001,11 +5014,12 @@ export const App: React.FC = () => {
                         background: "#0f172a",
                         border: "1px solid rgba(148,163,184,0.3)",
                         borderRadius: "0.5rem",
-                        padding: "1.5rem",
-                        maxWidth: "400px",
-                        maxHeight: "80vh",
+                        padding: "clamp(1rem, 3vw, 1.5rem)",
+                        maxWidth: "clamp(260px, 90vw, 450px)",
+                        maxHeight: "min(90vh, 700px)",
                         overflowY: "auto",
                         boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                        width: "100%",
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -5167,6 +5181,7 @@ export const App: React.FC = () => {
                       alignItems: "center",
                       justifyContent: "center",
                       zIndex: 9999,
+                      backdropFilter: "blur(2px)",
                     }}
                     onClick={() => !saveLayoutLoading && setSaveLayoutModalOpen(false)}
                   >
@@ -5175,9 +5190,10 @@ export const App: React.FC = () => {
                         background: "#0f172a",
                         border: "1px solid rgba(148,163,184,0.3)",
                         borderRadius: "0.5rem",
-                        padding: "1.5rem",
-                        maxWidth: "400px",
+                        padding: "clamp(1rem, 3vw, 1.5rem)",
+                        maxWidth: "clamp(250px, 90vw, 420px)",
                         boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                        width: "100%",
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -5817,6 +5833,7 @@ export const App: React.FC = () => {
                 alignItems: "center",
                 justifyContent: "center",
                 zIndex: 9999,
+                backdropFilter: "blur(2px)",
               }}
               onClick={() => setCompensationModalOpen(false)}
             >
@@ -5825,11 +5842,12 @@ export const App: React.FC = () => {
                   background: "#0f172a",
                   border: "1px solid rgba(148,163,184,0.3)",
                   borderRadius: "0.5rem",
-                  padding: "1.5rem",
-                  maxWidth: "600px",
-                  maxHeight: "80vh",
+                  padding: "clamp(1rem, 3vw, 1.5rem)",
+                  maxWidth: "clamp(280px, 90vw, 650px)",
+                  maxHeight: "min(90vh, 800px)",
                   overflowY: "auto",
                   boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                  width: "100%",
                 }}
                 onClick={(e) => e.stopPropagation()}
               >

@@ -5,6 +5,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from models.file_models import FileDensityResponse, FileEventsResponse
 from models.gate_models import GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest
@@ -234,6 +235,121 @@ async def export_gate_csv(
     rows,
     media_type="text/csv",
     headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+  )
+
+
+# R-1: Quadrant gate (FlowJo-style 4-region gate)
+
+
+class QuadrantGateRequest(BaseModel):
+  """Create a quadrant gate (4-region split with crosshair).
+
+  Creates 4 rectangle gates atomically:
+    Q1: top-right (x>x_split, y>y_split) - both positive
+    Q2: top-left  (x<x_split, y>y_split) - x neg, y pos
+    Q3: bottom-left (x<x_split, y<y_split) - both negative
+    Q4: bottom-right (x>x_split, y<y_split) - x pos, y neg
+  """
+  file_id: str
+  x_channel: str
+  y_channel: str
+  x_split: float = Field(..., description="X-axis crosshair position (transformed space)")
+  y_split: float = Field(..., description="Y-axis crosshair position (transformed space)")
+  name_prefix: str = Field("Quad", description="Gate name prefix; will create {prefix}_Q1..Q4")
+  parent_gate_id: str | None = None
+  transform_x: str = "linear"
+  transform_y: str = "linear"
+  arcsinh_cofactor: float = 150.0
+  logicle_T: float = 262144.0
+  logicle_W: float = 0.5
+  logicle_M: float = 4.5
+  logicle_A: float = 0.0
+  # Bounds for the outer extent of quadrants (defaults to large range)
+  x_min: float = Field(-1e10, description="Outer left bound")
+  x_max: float = Field(1e10, description="Outer right bound")
+  y_min: float = Field(-1e10, description="Outer bottom bound")
+  y_max: float = Field(1e10, description="Outer top bound")
+
+
+class QuadrantGateResponse(BaseModel):
+  """Response from quadrant gate creation."""
+  q1: GateResponse  # top-right
+  q2: GateResponse  # top-left
+  q3: GateResponse  # bottom-left
+  q4: GateResponse  # bottom-right
+  x_split: float
+  y_split: float
+
+
+@router.post("/quadrant", response_model=QuadrantGateResponse)
+async def create_quadrant_gate(body: QuadrantGateRequest) -> QuadrantGateResponse:
+  """Create a quadrant gate: 4 rectangle gates split by an X/Y crosshair.
+
+  Common FlowJo-style operation for 2D plots. Returns all 4 sub-gates.
+  """
+  from models.gate_models import RectangleGateCreate, GateCreateRequest as GCR
+
+  common_kwargs = dict(
+    file_id=body.file_id,
+    x_channel=body.x_channel,
+    y_channel=body.y_channel,
+    parent_gate_id=body.parent_gate_id,
+    transform_x=body.transform_x,
+    transform_y=body.transform_y,
+    arcsinh_cofactor=body.arcsinh_cofactor,
+    logicle_T=body.logicle_T,
+    logicle_W=body.logicle_W,
+    logicle_M=body.logicle_M,
+    logicle_A=body.logicle_A,
+  )
+
+  quadrants = [
+    # Q1: top-right (high X, high Y) — typically double-positive
+    (f"{body.name_prefix}_Q1", body.x_split, body.y_split, body.x_max, body.y_max),
+    # Q2: top-left (low X, high Y)
+    (f"{body.name_prefix}_Q2", body.x_min, body.y_split, body.x_split, body.y_max),
+    # Q3: bottom-left (low X, low Y) — typically double-negative
+    (f"{body.name_prefix}_Q3", body.x_min, body.y_min, body.x_split, body.y_split),
+    # Q4: bottom-right (high X, low Y)
+    (f"{body.name_prefix}_Q4", body.x_split, body.y_min, body.x_max, body.y_split),
+  ]
+
+  created: list[GateResponse] = []
+  created_ids: list[str] = []
+  try:
+    for (name, xmn, ymn, xmx, ymx) in quadrants:
+      req = GCR(
+        name=name,
+        params=RectangleGateCreate(type="rectangle", x_min=xmn, y_min=ymn, x_max=xmx, y_max=ymx),
+        **common_kwargs,
+      )
+      resp = gates_service.create_gate(req)
+      created.append(resp)
+      created_ids.append(resp.id)
+  except GateNameExistsError as exc:
+    # Roll back partial creates
+    for gid in created_ids:
+      try:
+        gates_service.delete_gate(gid)
+      except Exception:
+        pass
+    raise HTTPException(status_code=409, detail=str(exc)) from exc
+  except (ValueError, KeyError) as exc:
+    for gid in created_ids:
+      try:
+        gates_service.delete_gate(gid)
+      except Exception:
+        pass
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+  _snapshot_session_async()
+  return QuadrantGateResponse(
+    q1=created[0],
+    q2=created[1],
+    q3=created[2],
+    q4=created[3],
+    x_split=body.x_split,
+    y_split=body.y_split,
   )
 
 

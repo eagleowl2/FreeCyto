@@ -142,6 +142,9 @@ export const App: React.FC = () => {
     DEFAULT_Y_TRANSFORM,
   );
   const [points, setPoints] = React.useState<ScatterPoint[]>([]);
+  // R-3: Backgating - show parent population as faded background overlay
+  const [showBackgate, setShowBackgate] = React.useState<boolean>(false);
+  const [backgatePoints, setBackgatePoints] = React.useState<ScatterPoint[]>([]);
   /** Min/max in current transform space (plot axes). Gate coordinates are in this space. */
   const [transformedRange, setTransformedRange] = React.useState<{
     xMin: number;
@@ -1092,6 +1095,38 @@ export const App: React.FC = () => {
     setGateMessage(null);
     setActiveGateId(null);
   }, [file?.id, fetchGateTree, fetchDerivedParams]);
+
+  // R-3: Fetch parent population events for backgating overlay
+  React.useEffect(() => {
+    if (!showBackgate || !file?.id || !activeGateId || plotMode === "histogram" || !transformedRange) {
+      setBackgatePoints([]);
+      return;
+    }
+    const activeGate = gateList.find((g) => g.id === activeGateId);
+    const tr = transformedRange;
+    const norm = (raw: { events: number[][] }) => {
+      // Normalize using the SAME range as main points for proper alignment
+      const xSpan = tr.xMax - tr.xMin || 1;
+      const ySpan = tr.yMax - tr.yMin || 1;
+      return raw.events.map((row) => ({
+        x: ((row[0] ?? 0) - tr.xMin) / xSpan,
+        y: ((row[1] ?? 0) - tr.yMin) / ySpan,
+      }));
+    };
+    const params = new URLSearchParams({
+      x_channel: xChannel,
+      y_channel: yChannel,
+      transform_x: transformX,
+      transform_y: transformY,
+      max_events: "8000",
+    });
+    const url = activeGate?.parent_gate_id
+      ? `${API_BASE}/api/gates/${encodeURIComponent(activeGate.parent_gate_id)}/events?${params}`
+      : `${API_BASE}/api/files/${encodeURIComponent(file.id)}/events?${params}`;
+    void getJson<{ events: number[][] }>(url)
+      .then((resp) => setBackgatePoints(norm(resp)))
+      .catch(() => setBackgatePoints([]));
+  }, [showBackgate, file?.id, activeGateId, xChannel, yChannel, transformX, transformY, plotMode, gateList, transformedRange]);
 
   const clearGatesForTransformChange = React.useCallback(async () => {
     if (!file?.id) return;
@@ -3719,6 +3754,25 @@ export const App: React.FC = () => {
                   >
                     {plotBgMode === "white" ? "Plot: light" : "Plot: dark"}
                   </button>
+                  {/* R-3: Backgating toggle (only available in points mode with active gate) */}
+                  {plotMode === "points" && activeGateId && (
+                    <button
+                      type="button"
+                      onClick={() => setShowBackgate((b) => !b)}
+                      title="Toggle backgating: show parent population as faded background overlay"
+                      style={{
+                        padding: "0.1rem 0.45rem",
+                        borderRadius: "999px",
+                        border: showBackgate ? "1px solid rgba(168,85,247,0.9)" : "1px solid rgba(148,163,184,0.6)",
+                        fontSize: "0.7rem",
+                        cursor: "pointer",
+                        backgroundColor: showBackgate ? "rgba(168,85,247,0.2)" : "transparent",
+                        color: showBackgate ? "#d8b4fe" : "#e5e7eb",
+                      }}
+                    >
+                      {showBackgate ? "✓ Backgate" : "Backgate"}
+                    </button>
+                  )}
                   {/* E-4: compensation status badge in plot header */}
                   {file && (
                     <span
@@ -3895,6 +3949,18 @@ export const App: React.FC = () => {
               >
                 {/* P-2: inner div repositioned by czStyle to implement CSS zoom */}
                 <div style={czStyle}>
+                  {/* R-3: Backgating layer (parent population) - rendered behind main scatter */}
+                  {showBackgate && backgatePoints.length > 0 && (
+                    <div style={{ position: "absolute", inset: 0 }}>
+                      <ScatterCanvas
+                        points={backgatePoints}
+                        plotAreaW={plotAreaW}
+                        plotAreaH={plotAreaH}
+                        bgMode={plotBgMode}
+                        pointColor={plotBgMode === "white" ? "rgba(120,120,120,0.35)" : "rgba(180,180,180,0.25)"}
+                      />
+                    </div>
+                  )}
                   <ScatterCanvas points={points} plotAreaW={plotAreaW} plotAreaH={plotAreaH} bgMode={plotBgMode} />
                 </div>
               </div>
@@ -3943,44 +4009,38 @@ export const App: React.FC = () => {
                     const tr = transformedRange;
                     const xRaw = vr.xMin + (vr.xMax - vr.xMin) * x;
                     const yRaw = vr.yMin + (vr.yMax - vr.yMin) * y;
-                    const makeGate = async (name: string, xMin: number, xMax: number, yMin: number, yMax: number) => {
-                      const c = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
-                        file_id: file.id,
-                        name,
-                        x_channel: xChannel,
-                        y_channel: yChannel,
-                        type: "rectangle",
-                        parent_gate_id: activeGateId,
-                        transform_x: transformX,
-                        transform_y: transformY,
-                        arcsinh_cofactor: 150,
-                        params: { type: "rectangle", x_min: xMin, y_min: yMin, x_max: xMax, y_max: yMax },
-                      });
-                      return c.id;
-                    };
                     void (async () => {
                       try {
-                        const quad = (suffix: string) => [
-                          () => makeGate(`Q1${suffix}`, xRaw, tr.xMax, yRaw, tr.yMax),
-                          () => makeGate(`Q2${suffix}`, tr.xMin, xRaw, yRaw, tr.yMax),
-                          () => makeGate(`Q3${suffix}`, tr.xMin, xRaw, tr.yMin, yRaw),
-                          () => makeGate(`Q4${suffix}`, xRaw, tr.xMax, tr.yMin, yRaw),
-                        ];
+                        // Find an unused name prefix (Quad, Quad_2, Quad_3, ...)
                         const namesInUse = new Set(gateList.map((g) => g.name));
-                        let suffix = "";
-                        let picked = false;
-                        for (let a = 0; a < 100; a++) {
-                          const suf = a === 0 ? "" : ` (${a})`;
-                          const qn = [`Q1${suf}`, `Q2${suf}`, `Q3${suf}`, `Q4${suf}`];
-                          if (!qn.some((n) => namesInUse.has(n))) {
-                            suffix = suf;
-                            picked = true;
-                            break;
-                          }
+                        let prefix = "Quad";
+                        for (let a = 1; a < 100; a++) {
+                          const candidates = [`${prefix}_Q1`, `${prefix}_Q2`, `${prefix}_Q3`, `${prefix}_Q4`];
+                          if (!candidates.some((n) => namesInUse.has(n))) break;
+                          prefix = `Quad_${a + 1}`;
                         }
-                        if (!picked) suffix = ` (${Date.now()})`;
-                        const createdIds: string[] = [];
-                        for (const fn of quad(suffix)) createdIds.push(await fn());
+
+                        // R-1: Use atomic quadrant endpoint (auto rollback on failure)
+                        const result = await postJson<{ q1: { id: string }; q2: { id: string }; q3: { id: string }; q4: { id: string } }>(
+                          `${API_BASE}/api/gates/quadrant`,
+                          {
+                            file_id: file.id,
+                            x_channel: xChannel,
+                            y_channel: yChannel,
+                            x_split: xRaw,
+                            y_split: yRaw,
+                            name_prefix: prefix,
+                            parent_gate_id: activeGateId,
+                            transform_x: transformX,
+                            transform_y: transformY,
+                            arcsinh_cofactor: 150,
+                            x_min: tr.xMin,
+                            x_max: tr.xMax,
+                            y_min: tr.yMin,
+                            y_max: tr.yMax,
+                          }
+                        );
+                        const createdIds = [result.q1.id, result.q2.id, result.q3.id, result.q4.id];
                         undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create_batch", gateIds: createdIds }];
                         redoStackRef.current = [];
                         await fetchGateTree(file.id);
@@ -4358,8 +4418,12 @@ export const App: React.FC = () => {
                   const pvRaw = previewGate?.id === g.id ? previewGate : null;
                   const pvRect = pvRaw?.kind === "rect" ? pvRaw : null;
                   const pvPoly = pvRaw?.kind === "poly" ? pvRaw : null;
-                  const pct = g.pct_of_parent ?? g.pct_of_total ?? 0;
-                  const label = `${g.name}  ${g.count.toLocaleString()} (${pct.toFixed(1)}%)`;
+                  // R-2: FlowJo-style dual percentage label (% parent / % total) when both differ
+                  const pctParent = g.pct_of_parent ?? 0;
+                  const pctTotal = g.pct_of_total ?? g.pct_total ?? 0;
+                  const label = (g.parent_gate_id && Math.abs(pctParent - pctTotal) > 0.05)
+                    ? `${g.name}  ${g.count.toLocaleString()} (${pctParent.toFixed(1)}%P / ${pctTotal.toFixed(1)}%T)`
+                    : `${g.name}  ${g.count.toLocaleString()} (${pctParent.toFixed(1)}%)`;
                   const canDrag = !drawMode;
 
                   if (g.type === "rectangle" &&

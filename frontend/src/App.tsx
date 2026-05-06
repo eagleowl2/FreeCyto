@@ -199,6 +199,7 @@ export const App: React.FC = () => {
   const [spilloverData, setSpilloverData] = React.useState<SpilloverData | null>(null);
   const [spilloverLoading, setSpilloverLoading] = React.useState(false);
   const [compensationModalOpen, setCompensationModalOpen] = React.useState(false);
+  const [compensationFullMatrixOpen, setCompensationFullMatrixOpen] = React.useState(false);
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
     () =>
@@ -1071,13 +1072,14 @@ export const App: React.FC = () => {
   React.useEffect(() => {
     const handleEscKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (compensationModalOpen) setCompensationModalOpen(false);
+        if (compensationFullMatrixOpen) setCompensationFullMatrixOpen(false);
+        else if (compensationModalOpen) setCompensationModalOpen(false);
         else if (saveLayoutModalOpen) setSaveLayoutModalOpen(false);
       }
     };
     window.addEventListener("keydown", handleEscKey);
     return () => window.removeEventListener("keydown", handleEscKey);
-  }, [compensationModalOpen, saveLayoutModalOpen]);
+  }, [compensationModalOpen, compensationFullMatrixOpen, saveLayoutModalOpen]);
 
   React.useEffect(() => {
     if (file?.id) {
@@ -5822,172 +5824,273 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {/* Q-4: Compensation matrix drawer (right-side panel, hidden by default) */}
+          {/* Q-4: Compensation summary popover (compact, ~220px wide) */}
           {compensationModalOpen && (
             <div
               style={{
                 position: "fixed",
-                top: 0,
-                right: 0,
-                bottom: 0,
-                width: "clamp(280px, 35vw, 380px)",
+                top: "1rem",
+                right: "1rem",
+                width: "220px",
+                maxHeight: "min(60vh, 380px)",
                 background: "#0f172a",
-                border: "1px solid rgba(148,163,184,0.3)",
-                borderLeft: "2px solid rgba(168,85,247,0.5)",
-                borderRight: "none",
-                borderRadius: "0 0 0 0.5rem",
-                boxShadow: "-10px 0 30px rgba(0,0,0,0.6)",
+                border: "1px solid rgba(168,85,247,0.5)",
+                borderRadius: "0.5rem",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
                 zIndex: 9998,
                 display: "flex",
                 flexDirection: "column",
-                overflowY: "auto",
+                overflow: "hidden",
               }}
             >
-              {/* Drawer header */}
+              {/* Compact header */}
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  padding: "1rem",
+                  padding: "0.5rem 0.75rem",
                   borderBottom: "1px solid rgba(148,163,184,0.2)",
-                  flexShrink: 0,
+                  background: "rgba(168,85,247,0.08)",
                 }}
               >
-                <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e5e7eb" }}>
+                <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "#d8b4fe" }}>
                   🔬 Compensation
                 </div>
                 <button
                   type="button"
                   onClick={() => setCompensationModalOpen(false)}
-                  title="Close drawer (or press Esc)"
+                  title="Close (Esc)"
                   style={{
                     background: "none",
                     border: "none",
                     color: "#64748b",
-                    fontSize: "1.3rem",
+                    fontSize: "1rem",
                     cursor: "pointer",
-                    padding: "0 0.3rem",
-                    transition: "color 0.2s",
+                    padding: "0 0.2rem",
+                    lineHeight: 1,
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = "#94a3b8")}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
                 >
                   ✕
                 </button>
               </div>
 
-              {/* Drawer content */}
-              <div style={{ padding: "1rem", overflowY: "auto", flex: 1 }}>
+              {/* Compact summary content */}
+              <div style={{ padding: "0.6rem 0.75rem", overflowY: "auto", flex: 1 }}>
                 {spilloverLoading ? (
-                  <div style={{ fontSize: "0.8rem", color: "#64748b", textAlign: "center", paddingTop: "2rem" }}>
-                    Loading spillover matrix…
+                  <div style={{ fontSize: "0.7rem", color: "#64748b", textAlign: "center", padding: "1rem 0" }}>
+                    Loading…
                   </div>
                 ) : spilloverData ? (
                   <>
-                    <div style={{ fontSize: "0.72rem", color: "#9ca3af", marginBottom: "0.75rem", lineHeight: "1.4" }}>
-                      <div style={{ fontWeight: 500, color: "#cbd5e1", marginBottom: "0.3rem" }}>
-                        Condition: {spilloverData.cond.toFixed(2)}
+                    {/* Key metric: Condition Number */}
+                    <div
+                      style={{
+                        padding: "0.5rem",
+                        borderRadius: "0.3rem",
+                        background: "rgba(30,41,59,0.5)",
+                        marginBottom: "0.6rem",
+                        textAlign: "center",
+                      }}
+                    >
+                      <div style={{ fontSize: "0.6rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.2rem" }}>
+                        Condition Number
                       </div>
-                      <div>
+                      <div
+                        style={{
+                          fontSize: "1.3rem",
+                          fontWeight: 700,
+                          color: spilloverData.cond < 10 ? "#86efac" : spilloverData.cond < 100 ? "#fbbf24" : "#f87171",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {spilloverData.cond.toFixed(2)}
+                      </div>
+                      <div style={{ fontSize: "0.65rem", color: "#9ca3af", marginTop: "0.15rem" }}>
                         {spilloverData.cond < 10 ? "✓ Good" : spilloverData.cond < 100 ? "⚠ Fair" : "✗ Poor"}
                       </div>
                     </div>
-                    <div style={{ overflowX: "auto", fontSize: "0.65rem", marginBottom: "0.75rem" }}>
-                      <table
-                        style={{
-                          width: "100%",
-                          borderCollapse: "collapse",
-                          color: "#cbd5e1",
-                          minWidth: "240px",
-                        }}
-                      >
-                        <thead>
-                          <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.2)" }}>
-                            <th
-                              style={{
-                                padding: "0.3rem 0.3rem",
-                                textAlign: "left",
-                                color: "#9ca3af",
-                                fontWeight: 500,
-                                fontSize: "0.65rem",
-                              }}
-                            >
-                              Det
-                            </th>
-                            {spilloverData.channel_names.map((ch) => (
-                              <th
-                                key={ch}
-                                style={{
-                                  padding: "0.3rem 0.25rem",
-                                  textAlign: "right",
-                                  color: "#9ca3af",
-                                  fontWeight: 500,
-                                  fontSize: "0.6rem",
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  maxWidth: "40px",
-                                }}
-                                title={ch}
-                              >
-                                {ch.substring(0, 2)}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {spilloverData.channel_names.map((rowCh, i) => (
-                            <tr key={rowCh} style={{ background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.05)" }}>
-                              <td style={{ padding: "0.25rem 0.3rem", fontWeight: 500, fontSize: "0.6rem", whiteSpace: "nowrap" }}>
-                                {rowCh.substring(0, 3)}
-                              </td>
-                              {spilloverData.matrix[i].map((val, j) => (
-                                <td
-                                  key={`${i}-${j}`}
+
+                    {/* Top spillovers */}
+                    {(() => {
+                      const topSpillovers: { from: string; to: string; val: number }[] = [];
+                      for (let i = 0; i < spilloverData.matrix.length; i++) {
+                        const row = spilloverData.matrix[i];
+                        if (!row) continue;
+                        for (let j = 0; j < row.length; j++) {
+                          if (i !== j && row[j]! > 0.01) {
+                            topSpillovers.push({
+                              from: spilloverData.channel_names[j]!,
+                              to: spilloverData.channel_names[i]!,
+                              val: row[j]!,
+                            });
+                          }
+                        }
+                      }
+                      topSpillovers.sort((a, b) => b.val - a.val);
+                      const top3 = topSpillovers.slice(0, 3);
+
+                      return (
+                        <>
+                          <div style={{ fontSize: "0.6rem", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.3rem" }}>
+                            Top Spillovers
+                          </div>
+                          {top3.length === 0 ? (
+                            <div style={{ fontSize: "0.65rem", color: "#64748b", fontStyle: "italic", marginBottom: "0.5rem" }}>
+                              None significant
+                            </div>
+                          ) : (
+                            <div style={{ marginBottom: "0.5rem" }}>
+                              {top3.map((sp, idx) => (
+                                <div
+                                  key={idx}
                                   style={{
-                                    padding: "0.25rem 0.2rem",
-                                    textAlign: "right",
-                                    fontVariantNumeric: "tabular-nums",
-                                    fontSize: "0.6rem",
-                                    color:
-                                      i === j
-                                        ? "#86efac"
-                                        : val > 0.05
-                                          ? "#fbbf24"
-                                          : val > 0
-                                            ? "#9ca3af"
-                                            : "#4b5563",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    padding: "0.2rem 0.3rem",
+                                    fontSize: "0.65rem",
+                                    color: "#cbd5e1",
+                                    borderBottom: idx < top3.length - 1 ? "1px solid rgba(148,163,184,0.1)" : "none",
                                   }}
-                                  title={`${(val * 100).toFixed(1)}%`}
                                 >
-                                  {(val * 100).toFixed(0)}
-                                </td>
+                                  <span style={{ fontFamily: "monospace" }}>
+                                    {sp.from.substring(0, 6)} → {sp.to.substring(0, 6)}
+                                  </span>
+                                  <span
+                                    style={{
+                                      color: sp.val > 0.05 ? "#fbbf24" : "#9ca3af",
+                                      fontWeight: 600,
+                                      fontVariantNumeric: "tabular-nums",
+                                    }}
+                                  >
+                                    {(sp.val * 100).toFixed(1)}%
+                                  </span>
+                                </div>
                               ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+
+                    {/* Quick info */}
+                    <div style={{ fontSize: "0.6rem", color: "#64748b", marginBottom: "0.6rem", lineHeight: "1.3" }}>
+                      {spilloverData.channel_names.length} channels
                     </div>
-                    <div style={{ fontSize: "0.65rem", color: "#6b7280", lineHeight: "1.3" }}>
-                      <div style={{ marginBottom: "0.4rem" }}>
-                        <span style={{ color: "#86efac", fontWeight: 600 }}>■ Diag</span> = sensitivity
-                      </div>
-                      <div>
-                        <span style={{ color: "#fbbf24", fontWeight: 600 }}>■ Yellow</span> = spillover &gt;5%
-                      </div>
-                    </div>
+
+                    {/* View Full Matrix button */}
+                    <button
+                      type="button"
+                      onClick={() => setCompensationFullMatrixOpen(true)}
+                      style={{
+                        width: "100%",
+                        padding: "0.4rem",
+                        borderRadius: "0.3rem",
+                        border: "1px solid rgba(168,85,247,0.4)",
+                        background: "rgba(168,85,247,0.15)",
+                        color: "#d8b4fe",
+                        fontSize: "0.7rem",
+                        fontWeight: 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      View Full Matrix →
+                    </button>
                   </>
                 ) : (
-                  <div style={{ fontSize: "0.8rem", color: "#64748b", textAlign: "center", paddingTop: "2rem" }}>
-                    No compensation matrix in file.
+                  <div style={{ fontSize: "0.7rem", color: "#64748b", textAlign: "center", padding: "1rem 0" }}>
+                    No compensation matrix.
                   </div>
                 )}
               </div>
             </div>
           )}
 
-          {/* Overlay backdrop for drawer (click to close) */}
+          {/* Q-4b: Full matrix modal (only shown when explicitly requested) */}
+          {compensationFullMatrixOpen && spilloverData && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10000,
+                backdropFilter: "blur(2px)",
+              }}
+              onClick={() => setCompensationFullMatrixOpen(false)}
+            >
+              <div
+                style={{
+                  background: "#0f172a",
+                  border: "1px solid rgba(148,163,184,0.3)",
+                  borderRadius: "0.5rem",
+                  padding: "1.25rem",
+                  maxWidth: "min(90vw, 800px)",
+                  maxHeight: "85vh",
+                  overflowY: "auto",
+                  boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                  width: "100%",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                  <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "#e5e7eb" }}>
+                    Compensation Matrix — Full View
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCompensationFullMatrixOpen(false)}
+                    style={{ background: "none", border: "none", color: "#64748b", fontSize: "1.2rem", cursor: "pointer", padding: "0.2rem 0.4rem" }}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div style={{ overflowX: "auto", fontSize: "0.75rem" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", color: "#cbd5e1" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.2)" }}>
+                        <th style={{ padding: "0.4rem 0.5rem", textAlign: "left", color: "#9ca3af", fontWeight: 500 }}>Detector</th>
+                        {spilloverData.channel_names.map((ch) => (
+                          <th key={ch} style={{ padding: "0.4rem 0.5rem", textAlign: "right", color: "#9ca3af", fontWeight: 500 }}>
+                            {ch}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {spilloverData.channel_names.map((rowCh, i) => (
+                        <tr key={rowCh} style={{ background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.03)" }}>
+                          <td style={{ padding: "0.3rem 0.5rem", fontWeight: 500 }}>{rowCh}</td>
+                          {spilloverData.matrix[i]!.map((val, j) => (
+                            <td
+                              key={`${i}-${j}`}
+                              style={{
+                                padding: "0.3rem 0.5rem",
+                                textAlign: "right",
+                                fontVariantNumeric: "tabular-nums",
+                                color: i === j ? "#86efac" : val > 0.05 ? "#fbbf24" : val > 0 ? "#cbd5e1" : "#4b5563",
+                              }}
+                            >
+                              {(val * 100).toFixed(1)}%
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: "0.75rem", fontSize: "0.7rem", color: "#6b7280", fontStyle: "italic" }}>
+                  Diagonal = detector sensitivity • <span style={{ color: "#86efac" }}>■</span> diagonal,{" "}
+                  <span style={{ color: "#fbbf24" }}>■</span> spillover &gt;5%
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Backdrop for popover (click to close) */}
           {compensationModalOpen && (
             <div
               style={{

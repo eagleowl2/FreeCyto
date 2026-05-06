@@ -58,8 +58,22 @@ class BooleanGateCreate(BaseModel):
   expression: str = Field(..., min_length=1, description="Boolean expression over gate names")
 
 
+class EllipseGateCreate(BaseModel):
+  """Ellipse gate in transformed channel space.
+
+  The ellipse is defined by its centre, semi-axes, and an optional CCW rotation angle.
+  All coordinates are in the same transformed space as the plot axes.
+  """
+  type: Literal["ellipse"]
+  center_x: float = Field(..., description="X coordinate of ellipse centre (transformed space)")
+  center_y: float = Field(..., description="Y coordinate of ellipse centre (transformed space)")
+  radius_x: float = Field(..., gt=0.0, description="Semi-axis length along X before rotation")
+  radius_y: float = Field(..., gt=0.0, description="Semi-axis length along Y before rotation")
+  angle: float = Field(0.0, description="CCW rotation angle in degrees")
+
+
 GateParamsCreate = Annotated[
-  RectangleGateCreate | PolygonGateCreate | IntervalGateCreate | BooleanGateCreate,
+  RectangleGateCreate | PolygonGateCreate | IntervalGateCreate | BooleanGateCreate | EllipseGateCreate,
   Field(discriminator="type"),
 ]
 
@@ -106,6 +120,12 @@ class GateResponse(BaseModel):
   y_max: float | None = None
   vertices: List[List[float]] | None = None
   expression: str | None = Field(None, description="Boolean expression (type='boolean' only)")
+  # N: ellipse gate geometry
+  center_x: float | None = None
+  center_y: float | None = None
+  radius_x: float | None = None
+  radius_y: float | None = None
+  angle: float = 0.0
   count: int = 0
   pct_total: float = 0.0
   pct_of_parent: float = 0.0
@@ -119,12 +139,22 @@ class GateResponse(BaseModel):
 
 class GateUpdateRequest(BaseModel):
   """Update gate geometry in-place. Coordinates in transformed space (same as plot view).
-  Provide x_min/y_min/x_max/y_max for rectangle gates, vertices for polygon gates."""
+  Provide x_min/y_min/x_max/y_max for rectangle gates, vertices for polygon gates,
+  center_x/center_y/radius_x/radius_y/angle for ellipse gates.
+  Provide name to rename a gate (must be non-empty and unique within the file)."""
+  # O: gate rename
+  name: str | None = Field(None, min_length=1, description="New display name (unique within file)")
   x_min: float | None = None
   y_min: float | None = None
   x_max: float | None = None
   y_max: float | None = None
   vertices: List[List[float]] | None = None
+  # N: ellipse gate update fields
+  center_x: float | None = None
+  center_y: float | None = None
+  radius_x: float | None = None
+  radius_y: float | None = None
+  angle: float | None = None
 
 
 class ChannelStats(BaseModel):

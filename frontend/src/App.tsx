@@ -189,7 +189,11 @@ export const App: React.FC = () => {
     nyMax: number;
     gateName: string;
   } | null>(null);
-  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "interval" | "boolean" | null>("rectangle");
+  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "ellipse" | "interval" | "boolean" | null>("rectangle");
+  // N: pending ellipse gate (after drag, before name + submit)
+  const [pendingEllipse, setPendingEllipse] = React.useState<{
+    nCx: number; nCy: number; nRx: number; nRy: number; gateName: string;
+  } | null>(null);
   const [drawMode, setDrawMode] = React.useState(false);
   const [drawingPolygon, setDrawingPolygon] = React.useState<{ points: { x: number; y: number }[] } | null>(null);
   const [fcsStatus, setFcsStatus] = React.useState<
@@ -251,8 +255,29 @@ export const App: React.FC = () => {
   const [histOverlayIds, setHistOverlayIds] = React.useState<string[]>([]);
   const [histOverlayData, setHistOverlayData] = React.useState<Record<string, HistogramData>>({});
 
+  // O: density contour lines toggle
+  const [showContours, setShowContours] = React.useState(false);
+
+  // P-2: plot zoom/pan
+  type ZoomState = { xMin: number; xMax: number; yMin: number; yMax: number };
+  const [zoom, setZoom] = React.useState<ZoomState | null>(null);
+  /** True while the user is pan-dragging (Space+drag) — used for cursor style only. */
+  const [isPanning, setIsPanning] = React.useState(false);
+  /** Ref so wheel/pan handlers always see the latest zoom without re-registering listeners. */
+  const zoomRef = React.useRef<ZoomState | null>(null);
+  zoomRef.current = zoom;
+  /** Ref so global handlers see the latest transformedRange without stale closure. */
+  const transformedRangeRef = React.useRef(transformedRange);
+  transformedRangeRef.current = transformedRange;
+  /** True while Space is held — checked synchronously in event handlers. */
+  const spaceDownRef = React.useRef(false);
+  /** Snapshot for pan: start cursor pos + zoom window at pan start. */
+  const panStartRef = React.useRef<{ clientX: number; clientY: number; zoomSnap: ZoomState } | null>(null);
+
   /** Monotonic id for plot data fetches; stale responses must not overwrite React state (see FRONTEND_REVIEW #1). */
   const plotRequestGenerationRef = React.useRef(0);
+  /** N: ref to the main plot SVG for PNG export. */
+  const plotSvgRef = React.useRef<SVGSVGElement>(null);
 
   /** Remember X/Y channel + transforms per file when switching loaded files (FRONTEND_APP_REVIEW NEW-13). */
   const perFileAxesRef = React.useRef(
@@ -786,6 +811,16 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  // O: rename a gate in-place (PATCH name only); re-fetches tree on success.
+  const handleRenameGate = React.useCallback(
+    async (gateId: string, newName: string) => {
+      if (!file) return;
+      await patchJson<unknown>(`${API_BASE}/api/gates/${encodeURIComponent(gateId)}`, { name: newName });
+      await fetchGateTree(file.id);
+    },
+    [file, fetchGateTree],
+  );
+
   const loadWorkspaceFromParsedBody = React.useCallback(
     async (body: unknown) => {
       type LoadResult = {
@@ -1088,9 +1123,38 @@ export const App: React.FC = () => {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [file, activeGateId, drawMode, pendingGate, fetchGateTree]);
 
-  // H/I: window-level mousemove/mouseup for smooth gate dragging (rect resize/move + polygon move)
+  // H/I/P-2: window-level mousemove/mouseup for gate dragging + pan
   React.useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
+      // P-2: Pan drag — translate zoom window.
+      const ps = panStartRef.current;
+      if (ps) {
+        const orig = transformedRangeRef.current;
+        if (!orig) return;
+        const { plotW: pW, plotH: pH, ml: mL, mt: mT, plotAreaW: paW, plotAreaH: paH } =
+          plotDimsRef.current;
+        const el = plotContainerRef.current;
+        const rect = el?.getBoundingClientRect();
+        if (!rect) return;
+        // Pixel delta in CSS pixels → viewBox pixels.
+        const dxVB = (e.clientX - ps.clientX) / rect.width  * pW;
+        const dyVB = (e.clientY - ps.clientY) / rect.height * pH;
+        // Convert viewBox pixel delta to data delta.
+        const dxData = -(dxVB / paW) * (ps.zoomSnap.xMax - ps.zoomSnap.xMin);
+        const dyData =  (dyVB / paH) * (ps.zoomSnap.yMax - ps.zoomSnap.yMin);
+        let nxMin = ps.zoomSnap.xMin + dxData;
+        let nxMax = ps.zoomSnap.xMax + dxData;
+        let nyMin = ps.zoomSnap.yMin + dyData;
+        let nyMax = ps.zoomSnap.yMax + dyData;
+        // Clamp so the window doesn't slide outside the original data range.
+        if (nxMin < orig.xMin) { nxMax += orig.xMin - nxMin; nxMin = orig.xMin; }
+        if (nxMax > orig.xMax) { nxMin -= nxMax - orig.xMax; nxMax = orig.xMax; }
+        if (nyMin < orig.yMin) { nyMax += orig.yMin - nyMin; nyMin = orig.yMin; }
+        if (nyMax > orig.yMax) { nyMin -= nyMax - orig.yMax; nyMax = orig.yMax; }
+        setZoom({ xMin: nxMin, xMax: nxMax, yMin: nyMin, yMax: nyMax });
+        return;
+      }
+
       const ds = dragRef.current;
       if (!ds) return;
       const clientDX = e.clientX - ds.startClientX;
@@ -1123,6 +1187,13 @@ export const App: React.FC = () => {
     };
 
     const onMouseUp = (e: MouseEvent) => {
+      // P-2: End pan drag.
+      if (panStartRef.current) {
+        panStartRef.current = null;
+        setIsPanning(false);
+        return;
+      }
+
       const ds = dragRef.current;
       if (!ds) return;
       dragRef.current = null;
@@ -1211,11 +1282,135 @@ export const App: React.FC = () => {
     return () => ro.disconnect();
   }, []);
 
+  // P-2: Clear zoom whenever the underlying data range changes (new file, gate, channel).
+  React.useEffect(() => {
+    setZoom(null);
+  }, [transformedRange]);
+
+  // P-2: Wheel zoom — scale the view window around the cursor, clamped to the data range.
+  React.useEffect(() => {
+    const el = plotContainerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const orig = transformedRangeRef.current;
+      if (!orig) return;
+      // Suppress browser scroll/page-zoom while hovering the plot.
+      e.preventDefault();
+      if (plotMode === "histogram") return;
+      const cur = zoomRef.current ?? orig;
+      const { plotW: pW, plotH: pH, ml: mL, mt: mT, plotAreaW: paW, plotAreaH: paH } =
+        plotDimsRef.current;
+      const rect = el.getBoundingClientRect();
+      // Convert cursor to fractional plot-area position [0,1].
+      const localX = ((e.clientX - rect.left) / rect.width) * pW;
+      const localY = ((e.clientY - rect.top)  / rect.height) * pH;
+      const fracX = Math.max(0, Math.min(1, (localX - mL) / paW));
+      const fracY = Math.max(0, Math.min(1, (localY - mT) / paH));
+      // Cursor in data space.
+      const dataX = cur.xMin + fracX * (cur.xMax - cur.xMin);
+      const dataY = cur.yMax - fracY * (cur.yMax - cur.yMin); // SVG y is inverted
+      // Zoom factor: scroll-up → zoom in (0.88×), scroll-down → zoom out (1.14×).
+      const factor = e.deltaY > 0 ? 1.14 : 1 / 1.14;
+      const newSpanX = (cur.xMax - cur.xMin) * factor;
+      const newSpanY = (cur.yMax - cur.yMin) * factor;
+      let nxMin = dataX - fracX * newSpanX;
+      let nxMax = nxMin + newSpanX;
+      let nyMax = dataY + fracY * newSpanY;
+      let nyMin = nyMax - newSpanY;
+      // Clamp to original data range.
+      if (nxMin < orig.xMin) { nxMax += orig.xMin - nxMin; nxMin = orig.xMin; }
+      if (nxMax > orig.xMax) { nxMin -= nxMax - orig.xMax; nxMax = orig.xMax; }
+      if (nyMin < orig.yMin) { nyMax += orig.yMin - nyMin; nyMin = orig.yMin; }
+      if (nyMax > orig.yMax) { nyMin -= nyMax - orig.yMax; nyMax = orig.yMax; }
+      // Prevent zooming below 1% of original span.
+      if (nxMax - nxMin < (orig.xMax - orig.xMin) * 0.01) return;
+      if (nyMax - nyMin < (orig.yMax - orig.yMin) * 0.01) return;
+      // If zoom returns to (essentially) the full range, clear it.
+      const eps = 1e-9;
+      if (nxMin <= orig.xMin + eps && nxMax >= orig.xMax - eps &&
+          nyMin <= orig.yMin + eps && nyMax >= orig.yMax - eps) {
+        setZoom(null);
+      } else {
+        setZoom({ xMin: nxMin, xMax: nxMax, yMin: nyMin, yMax: nyMax });
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plotMode]); // zoomRef/transformedRangeRef/plotDimsRef updated via refs → no extra deps needed
+
+  // P-2: Space key → pan mode. Global mousedown on the plot container starts a pan drag.
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" &&
+          !(e.target instanceof HTMLInputElement) &&
+          !(e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault(); // prevent page scroll while hovering plot
+        spaceDownRef.current = true;
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        spaceDownRef.current = false;
+        panStartRef.current = null;
+        setIsPanning(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  // P-2: Register mousedown on the plot container for pan initiation.
+  React.useEffect(() => {
+    const el = plotContainerRef.current;
+    if (!el) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (!spaceDownRef.current) return;
+      if (plotMode === "histogram") return;
+      const orig = transformedRangeRef.current;
+      if (!orig) return;
+      const snap = zoomRef.current ?? orig;
+      panStartRef.current = { clientX: e.clientX, clientY: e.clientY, zoomSnap: snap };
+      setIsPanning(true);
+      e.preventDefault(); // prevent text selection during drag
+    };
+    el.addEventListener("mousedown", onMouseDown);
+    return () => el.removeEventListener("mousedown", onMouseDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plotMode]);
+
   const plotW = plotSize.w;
   const plotH = plotSize.h;
   const { ml, mr, mt, mb } = plotScaledMargins(plotW, plotH);
   const plotAreaW = plotW - ml - mr;
   const plotAreaH = plotH - mt - mb;
+
+  // P-2: viewRange = zoomed window in 2D modes; full data range in histogram or when not zoomed.
+  const viewRange = zoom != null && plotMode !== "histogram" ? zoom : transformedRange;
+  /** Keep a ref to plot dims so pan/wheel handlers don't need stale-closure re-registration. */
+  const plotDimsRef = React.useRef({ plotW, plotH, ml, mt, plotAreaW, plotAreaH });
+  plotDimsRef.current = { plotW, plotH, ml, mt, plotAreaW, plotAreaH };
+
+  // P-2: Canvas inner-div positioning for zoom (percentage of clip div).
+  // The clip div covers the plot area [ml,mt,plotAreaW,plotAreaH].
+  // The data canvas covers transformedRange; viewRange is the visible sub-window.
+  const czStyle: React.CSSProperties = (() => {
+    if (!zoom || !transformedRange || plotMode === "histogram") {
+      return { position: "absolute", left: 0, top: 0, width: "100%", height: "100%" };
+    }
+    const tr = transformedRange;
+    const vr = zoom;
+    const left = (tr.xMin - vr.xMin) / (vr.xMax - vr.xMin) * 100;
+    const top  = (vr.yMax - tr.yMax) / (vr.yMax - vr.yMin) * 100;
+    const w    = (tr.xMax - tr.xMin) / (vr.xMax - vr.xMin) * 100;
+    const h    = (tr.yMax - tr.yMin) / (vr.yMax - vr.yMin) * 100;
+    return { position: "absolute", left: `${left}%`, top: `${top}%`, width: `${w}%`, height: `${h}%` };
+  })();
+
   const plotTickFill = plotBgMode === "white" ? "#1e293b" : "#e5e7eb";
   const plotInnerFill = plotBgMode === "white" ? "#ffffff" : "rgba(15,23,42,0.45)";
   const plotInnerStroke = plotBgMode === "white" ? "#cbd5e1" : "#4b5563";
@@ -2815,6 +3010,7 @@ export const App: React.FC = () => {
                         { id: "rectangle", label: "Rect" },
                         { id: "polygon", label: "Poly" },
                         { id: "quadrant", label: "Quad" },
+                        { id: "ellipse", label: "Ellipse" },
                       ]
                     : [{ id: "interval", label: "Interval" }]
                   ).map((tool) => {
@@ -2829,6 +3025,7 @@ export const App: React.FC = () => {
                           setDrawMode(next !== null);
                           setPendingGate(null);
                           setPendingInterval(null);
+                          setPendingEllipse(null);
                           setDrawingRect(null);
                           setDrawingPolygon(null);
                           setDrawingInterval(null);
@@ -2861,6 +3058,7 @@ export const App: React.FC = () => {
                           setDrawMode(false);
                           setPendingGate(null);
                           setPendingInterval(null);
+                          setPendingEllipse(null);
                           setDrawingRect(null);
                           setDrawingPolygon(null);
                           setDrawingInterval(null);
@@ -2908,7 +3106,8 @@ export const App: React.FC = () => {
                       type="button"
                       onClick={async () => {
                         if (!file || !pendingGate || !transformedRange) return;
-                        const r = transformedRange;
+                        // P-2: draw in viewRange space so gates placed while zoomed are correct.
+                        const r = viewRange ?? transformedRange;
                         const xMin = r.xMin + (r.xMax - r.xMin) * Math.min(pendingGate.nxMin, pendingGate.nxMax);
                         const xMax = r.xMin + (r.xMax - r.xMin) * Math.max(pendingGate.nxMin, pendingGate.nxMax);
                         const yMin = r.yMin + (r.yMax - r.yMin) * Math.min(pendingGate.nyMin, pendingGate.nyMax);
@@ -3043,6 +3242,79 @@ export const App: React.FC = () => {
                     </button>
                   </div>
                 )}
+                {/* N: Ellipse gate name form */}
+                {gateTool === "ellipse" && pendingEllipse && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={pendingEllipse.gateName}
+                      onChange={(e) => {
+                        setGateNameError(null);
+                        setPendingEllipse((p) => (p ? { ...p, gateName: e.target.value } : null));
+                      }}
+                      placeholder="Ellipse gate name"
+                      autoFocus
+                      style={{
+                        padding: "0.25rem 0.5rem",
+                        width: "150px",
+                        borderRadius: "0.35rem",
+                        border: "1px solid rgba(148,163,184,0.6)",
+                        background: "rgba(15,23,42,0.8)",
+                        color: "white",
+                        fontSize: "0.8rem",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!file || !pendingEllipse || !transformedRange) return;
+                        // P-2: use viewRange for correct data coords when placing in a zoomed view.
+                        const r = viewRange ?? transformedRange;
+                        const cx = r.xMin + (r.xMax - r.xMin) * pendingEllipse.nCx;
+                        const cy = r.yMin + (r.yMax - r.yMin) * pendingEllipse.nCy;
+                        const rx = (r.xMax - r.xMin) * pendingEllipse.nRx;
+                        const ry = (r.yMax - r.yMin) * pendingEllipse.nRy;
+                        const name = pendingEllipse.gateName.trim() || "Ellipse gate";
+                        setGateNameError(null);
+                        try {
+                          const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
+                            file_id: file.id,
+                            name,
+                            x_channel: xChannel,
+                            y_channel: yChannel,
+                            parent_gate_id: activeGateId,
+                            transform_x: transformX,
+                            transform_y: transformY,
+                            arcsinh_cofactor: 150,
+                            params: { type: "ellipse", center_x: cx, center_y: cy, radius_x: rx, radius_y: ry, angle: 0 },
+                          });
+                          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
+                          redoStackRef.current = [];
+                          await fetchGateTree(file.id);
+                          setPendingEllipse(null);
+                          setDrawMode(false);
+                          setGateTool(null);
+                        } catch (e) {
+                          if (e instanceof Error && e.message.startsWith("HTTP 409")) {
+                            setGateNameError("Name already in use");
+                          } else {
+                            setGateNameError(e instanceof Error ? e.message : "Failed to create ellipse gate");
+                          }
+                        }
+                      }}
+                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "none", fontSize: "0.8rem", cursor: "pointer", background: "#22c55e", color: "white" }}
+                    >
+                      Create ellipse gate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPendingEllipse(null); setDrawMode(true); }}
+                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "1px solid #6b7280", fontSize: "0.8rem", cursor: "pointer", background: "transparent", color: "#9ca3af" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
                 {gateTool === "polygon" && drawingPolygon && drawingPolygon.points.length >= 3 && (
                   <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
                     <input
@@ -3070,7 +3342,8 @@ export const App: React.FC = () => {
                       onClick={async () => {
                         if (!file || !transformedRange || !drawingPolygon) return;
                         const name = (pendingGate?.gateName ?? "").trim() || "Polygon gate";
-                        const r = transformedRange;
+                        // P-2: use viewRange so polygon vertices are in the correct data space.
+                        const r = viewRange ?? transformedRange;
                         const rawVerts = drawingPolygon.points.map((p) => [
                           r.xMin + (r.xMax - r.xMin) * p.x,
                           r.yMin + (r.yMax - r.yMin) * p.y,
@@ -3460,7 +3733,42 @@ export const App: React.FC = () => {
                       >
                         {densityDisplayScale === "log" ? "Density: log" : "Density: linear"}
                       </button>
+                      {/* O: density contour lines toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setShowContours((v) => !v)}
+                        style={{
+                          padding: "0.1rem 0.4rem",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(148,163,184,0.6)",
+                          fontSize: "0.65rem",
+                          cursor: "pointer",
+                          backgroundColor: showContours ? "rgba(148,163,184,0.35)" : "transparent",
+                          color: "#e5e7eb",
+                        }}
+                      >
+                        Contours
+                      </button>
                     </>
+                  )}
+                  {/* P-2: Reset zoom button — visible whenever a zoom is active in any 2D mode */}
+                  {zoom && plotMode !== "histogram" && (
+                    <button
+                      type="button"
+                      onClick={() => setZoom(null)}
+                      style={{
+                        padding: "0.1rem 0.45rem",
+                        borderRadius: "999px",
+                        border: "1px solid rgba(251,191,36,0.7)",
+                        fontSize: "0.65rem",
+                        cursor: "pointer",
+                        backgroundColor: "rgba(251,191,36,0.18)",
+                        color: "#fbbf24",
+                        fontWeight: 600,
+                      }}
+                    >
+                      ↺ Reset zoom
+                    </button>
                   )}
                 </div>
               </div>
@@ -3471,9 +3779,14 @@ export const App: React.FC = () => {
                 position: "relative",
                 width: "100%",
                 aspectRatio: "1 / 1",
+                cursor: isPanning ? "grabbing" : undefined,
+              }}
+              onDoubleClick={() => {
+                if (zoom !== null && plotMode !== "histogram") setZoom(null);
               }}
             >
             {plotMode === "density" && density && (
+              // Outer clip div: fixed to the plot area, hides overflow when zoomed.
               <div
                 style={{
                   position: "absolute",
@@ -3486,13 +3799,16 @@ export const App: React.FC = () => {
                   borderRadius: 2,
                 }}
               >
-                <PseudocolorCanvas
-                  counts={density.counts}
-                  width={Math.max(120, Math.floor(plotAreaW * 2))}
-                  height={Math.max(120, Math.floor(plotAreaH * 2))}
-                  colormap={densityColormap}
-                  scale={densityDisplayScale}
-                />
+                {/* P-2: inner div repositioned by czStyle to implement CSS zoom */}
+                <div style={czStyle}>
+                  <PseudocolorCanvas
+                    counts={density.counts}
+                    width={Math.max(120, Math.floor(plotAreaW * 2))}
+                    height={Math.max(120, Math.floor(plotAreaH * 2))}
+                    colormap={densityColormap}
+                    scale={densityDisplayScale}
+                  />
+                </div>
               </div>
             )}
             {plotMode === "points" && points.length > 0 && (
@@ -3508,7 +3824,10 @@ export const App: React.FC = () => {
                   borderRadius: 2,
                 }}
               >
-                <ScatterCanvas points={points} plotAreaW={plotAreaW} plotAreaH={plotAreaH} />
+                {/* P-2: inner div repositioned by czStyle to implement CSS zoom */}
+                <div style={czStyle}>
+                  <ScatterCanvas points={points} plotAreaW={plotAreaW} plotAreaH={plotAreaH} />
+                </div>
               </div>
             )}
             {drawMode && (
@@ -3542,7 +3861,7 @@ export const App: React.FC = () => {
                   const y = 1 - yDown;
                   if (gateTool === "interval") {
                     setDrawingInterval({ startX: x, endX: x });
-                  } else if (gateTool === "rectangle") {
+                  } else if (gateTool === "rectangle" || gateTool === "ellipse") {
                     setDrawingRect({ startX: x, startY: y, endX: x, endY: y });
                   } else if (gateTool === "polygon") {
                     setDrawingPolygon((prev) => ({
@@ -3550,9 +3869,11 @@ export const App: React.FC = () => {
                     }));
                   } else if (gateTool === "quadrant") {
                     if (!file || !transformedRange) return;
-                    const r = transformedRange;
-                    const xRaw = r.xMin + (r.xMax - r.xMin) * x;
-                    const yRaw = r.yMin + (r.yMax - r.yMin) * y;
+                    // P-2: cursor position uses viewRange (zoomed view); extents use transformedRange (full data).
+                    const vr = viewRange ?? transformedRange;
+                    const tr = transformedRange;
+                    const xRaw = vr.xMin + (vr.xMax - vr.xMin) * x;
+                    const yRaw = vr.yMin + (vr.yMax - vr.yMin) * y;
                     const makeGate = async (name: string, xMin: number, xMax: number, yMin: number, yMax: number) => {
                       const c = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
                         file_id: file.id,
@@ -3571,10 +3892,10 @@ export const App: React.FC = () => {
                     void (async () => {
                       try {
                         const quad = (suffix: string) => [
-                          () => makeGate(`Q1${suffix}`, xRaw, r.xMax, yRaw, r.yMax),
-                          () => makeGate(`Q2${suffix}`, r.xMin, xRaw, yRaw, r.yMax),
-                          () => makeGate(`Q3${suffix}`, r.xMin, xRaw, r.yMin, yRaw),
-                          () => makeGate(`Q4${suffix}`, xRaw, r.xMax, r.yMin, yRaw),
+                          () => makeGate(`Q1${suffix}`, xRaw, tr.xMax, yRaw, tr.yMax),
+                          () => makeGate(`Q2${suffix}`, tr.xMin, xRaw, yRaw, tr.yMax),
+                          () => makeGate(`Q3${suffix}`, tr.xMin, xRaw, tr.yMin, yRaw),
+                          () => makeGate(`Q4${suffix}`, xRaw, tr.xMax, tr.yMin, yRaw),
                         ];
                         const namesInUse = new Set(gateList.map((g) => g.name));
                         let suffix = "";
@@ -3638,7 +3959,8 @@ export const App: React.FC = () => {
                     const nxMin = Math.min(drawingInterval.startX, drawingInterval.endX);
                     const nxMax = Math.max(drawingInterval.startX, drawingInterval.endX);
                     if (nxMax - nxMin > 0.01) {
-                      const r = transformedRange;
+                      // P-2: use viewRange so interval drawn while zoomed maps to correct data coords.
+                      const r = viewRange ?? transformedRange;
                       const xMin_ = r.xMin + (r.xMax - r.xMin) * nxMin;
                       const xMax_ = r.xMin + (r.xMax - r.xMin) * nxMax;
                       setPendingInterval({ xMin: xMin_, xMax: xMax_, gateName: "" });
@@ -3658,10 +3980,28 @@ export const App: React.FC = () => {
                     setDrawingRect(null);
                     setDrawMode(false);
                   }
+                  if (gateTool === "ellipse" && drawingRect) {
+                    const nxMin = Math.min(drawingRect.startX, drawingRect.endX);
+                    const nxMax = Math.max(drawingRect.startX, drawingRect.endX);
+                    const nyMin = Math.min(drawingRect.startY, drawingRect.endY);
+                    const nyMax = Math.max(drawingRect.startY, drawingRect.endY);
+                    if (nxMax - nxMin > 0.01 && nyMax - nyMin > 0.01) {
+                      setPendingEllipse({
+                        nCx: (nxMin + nxMax) / 2,
+                        nCy: (nyMin + nyMax) / 2,
+                        nRx: (nxMax - nxMin) / 2,
+                        nRy: (nyMax - nyMin) / 2,
+                        gateName: "",
+                      });
+                    }
+                    setDrawingRect(null);
+                    setDrawMode(false);
+                  }
                 }}
               />
             )}
             <svg
+              ref={plotSvgRef}
               viewBox={`0 0 ${plotW} ${plotH}`}
               style={{
                 display: "block",
@@ -3685,10 +4025,11 @@ export const App: React.FC = () => {
               />
               {transformedRange && xChannel && (
                 <>
+                  {/* P-2: use viewRange for 2D axes so ticks reflect the zoomed window. */}
                   <AxisTicks
                     axis="x"
-                    min={transformedRange.xMin}
-                    max={transformedRange.xMax}
+                    min={(plotMode !== "histogram" ? viewRange?.xMin : undefined) ?? transformedRange.xMin}
+                    max={(plotMode !== "histogram" ? viewRange?.xMax : undefined) ?? transformedRange.xMax}
                     transform={transformX}
                     pixelStart={ml}
                     pixelEnd={ml + plotAreaW}
@@ -3698,8 +4039,8 @@ export const App: React.FC = () => {
                   {plotMode !== "histogram" && yChannel && (
                     <AxisTicks
                       axis="y"
-                      min={transformedRange.yMin}
-                      max={transformedRange.yMax}
+                      min={viewRange?.yMin ?? transformedRange.yMin}
+                      max={viewRange?.yMax ?? transformedRange.yMax}
                       transform={transformY}
                       pixelStart={0}
                       pixelEnd={plotAreaH}
@@ -3762,9 +4103,10 @@ export const App: React.FC = () => {
               )}
               {/* ── Gate overlays: rect + polygon shapes (scatter/density mode only).
                    Interval gates are rendered separately in histogram mode above. ── */}
-              {plotMode !== "histogram" && transformedRange && (() => {
+              {plotMode !== "histogram" && (viewRange ?? transformedRange) && (() => {
                 const GATE_COLORS = ["#22c55e","#3b82f6","#f59e0b","#ec4899","#8b5cf6","#06b6d4","#f97316","#a3e635"];
-                const { xMin, xMax, yMin, yMax } = transformedRange;
+                // P-2: use viewRange (zoomed window) so gate shapes scale correctly when zoomed.
+                const { xMin, xMax, yMin, yMax } = viewRange ?? transformedRange!;
                 const spanX = xMax - xMin || 1;
                 const spanY = yMax - yMin || 1;
                 const nx = (v: number) => Math.max(0, Math.min(1, (v - xMin) / spanX));
@@ -3804,7 +4146,143 @@ export const App: React.FC = () => {
                   };
                 };
 
-                return visibleGates.map((g, idx) => {
+                // ── O: density contour lines (marching squares) ──────────────────
+                const contourPaths: React.ReactNode[] = [];
+                if (showContours && density && plotMode === "density") {
+                  // Smooth the grid with a box blur (3×3, 3 passes ≈ Gaussian)
+                  const smoothGrid = (g: number[][], passes: number): number[][] => {
+                    let src = g;
+                    for (let p = 0; p < passes; p++) {
+                      const nR = src.length;
+                      const nC = src[0]?.length ?? 0;
+                      const dst: number[][] = Array.from({ length: nR }, () => new Array(nC).fill(0) as number[]);
+                      for (let r = 0; r < nR; r++) {
+                        for (let c = 0; c < nC; c++) {
+                          let sum = 0, cnt = 0;
+                          for (let dr = -1; dr <= 1; dr++) {
+                            for (let dc = -1; dc <= 1; dc++) {
+                              const rr = r + dr, cc = c + dc;
+                              if (rr >= 0 && rr < nR && cc >= 0 && cc < nC) {
+                                sum += (src[rr]?.[cc] ?? 0); cnt++;
+                              }
+                            }
+                          }
+                          dst[r]![c] = sum / cnt;
+                        }
+                      }
+                      src = dst;
+                    }
+                    return src;
+                  };
+
+                  // Marching squares lookup: edges 0=top,1=right,2=bottom,3=left
+                  // Case bits: bit3=TL,bit2=TR,bit1=BR,bit0=BL (1=above level)
+                  const MS_TABLE: [number, number][][] = [
+                    [],               // 0
+                    [[3, 2]],         // 1
+                    [[2, 1]],         // 2
+                    [[3, 1]],         // 3
+                    [[0, 1]],         // 4
+                    [[3, 0], [2, 1]], // 5 saddle
+                    [[0, 2]],         // 6
+                    [[0, 3]],         // 7
+                    [[0, 3]],         // 8
+                    [[0, 2]],         // 9
+                    [[0, 1], [3, 2]], // 10 saddle
+                    [[0, 1]],         // 11
+                    [[3, 1]],         // 12
+                    [[2, 1]],         // 13
+                    [[3, 2]],         // 14
+                    [],               // 15
+                  ];
+
+                  const contoursForLevel = (
+                    grid: number[][], level: number,
+                    gxMin: number, gxMax: number, gyMin: number, gyMax: number,
+                  ): string => {
+                    const nR = grid.length;
+                    const nC = grid[0]?.length ?? 0;
+                    if (nR < 2 || nC < 2) return "";
+                    const dx = (gxMax - gxMin) / nC;
+                    const dy = (gyMax - gyMin) / nR;
+                    // grid[r][c]: r=0=yMin (bottom), r=nR-1=yMax (top)
+                    // colX(c) = gxMin + c*dx, rowY(r) = gyMin + r*dy
+                    const colX = (c: number) => gxMin + c * dx;
+                    const rowY = (r: number) => gyMin + r * dy;
+                    const edgePt = (edge: number, r: number, c: number,
+                      tl: number, tr: number, br: number, bl: number): [number, number] => {
+                      const interp = (a: number, b: number) =>
+                        b === a ? 0.5 : Math.max(0, Math.min(1, (level - a) / (b - a)));
+                      if (edge === 0) { // top: TL→TR, y=rowY(r+1)
+                        const t = interp(tl, tr);
+                        return [toSvgX(colX(c) + t * dx), toSvgY(rowY(r + 1))];
+                      } else if (edge === 1) { // right: TR→BR, x=colX(c+1)
+                        const t = interp(tr, br);
+                        return [toSvgX(colX(c + 1)), toSvgY(rowY(r + 1) - t * dy)];
+                      } else if (edge === 2) { // bottom: BL→BR, y=rowY(r)
+                        const t = interp(bl, br);
+                        return [toSvgX(colX(c) + t * dx), toSvgY(rowY(r))];
+                      } else { // left: TL→BL, x=colX(c)
+                        const t = interp(tl, bl);
+                        return [toSvgX(colX(c)), toSvgY(rowY(r + 1) - t * dy)];
+                      }
+                    };
+                    const segs: string[] = [];
+                    for (let r = 0; r < nR - 1; r++) {
+                      for (let c = 0; c < nC - 1; c++) {
+                        // BL=grid[r][c], BR=grid[r][c+1], TL=grid[r+1][c], TR=grid[r+1][c+1]
+                        const bl = grid[r]?.[c] ?? 0;
+                        const br = grid[r]?.[c + 1] ?? 0;
+                        const tl = grid[r + 1]?.[c] ?? 0;
+                        const tr = grid[r + 1]?.[c + 1] ?? 0;
+                        const caseIdx =
+                          ((tl >= level ? 1 : 0) << 3) |
+                          ((tr >= level ? 1 : 0) << 2) |
+                          ((br >= level ? 1 : 0) << 1) |
+                          ((bl >= level ? 1 : 0) << 0);
+                        const msSegs = MS_TABLE[caseIdx];
+                        if (!msSegs) continue;
+                        for (const [e0, e1] of msSegs) {
+                          const [x0, y0] = edgePt(e0, r, c, tl, tr, br, bl);
+                          const [x1, y1] = edgePt(e1, r, c, tl, tr, br, bl);
+                          segs.push(`M${x0.toFixed(1)},${y0.toFixed(1)}L${x1.toFixed(1)},${y1.toFixed(1)}`);
+                        }
+                      }
+                    }
+                    return segs.join(" ");
+                  };
+
+                  const smoothed = smoothGrid(density.counts, 3);
+                  // Find max for level computation
+                  let maxCount = 0;
+                  for (const row of smoothed) for (const v of row) if (v > maxCount) maxCount = v;
+                  if (maxCount > 0) {
+                    const CONTOUR_LEVELS = [0.15, 0.30, 0.50, 0.70, 0.87];
+                    const CONTOUR_OPACITIES = [0.35, 0.45, 0.55, 0.65, 0.75];
+                    CONTOUR_LEVELS.forEach((frac, i) => {
+                      const level = frac * maxCount;
+                      const d = contoursForLevel(
+                        smoothed, level,
+                        density.xMin, density.xMax, density.yMin, density.yMax,
+                      );
+                      if (d) {
+                        contourPaths.push(
+                          <path
+                            key={`contour-${i}`}
+                            d={d}
+                            fill="none"
+                            stroke="white"
+                            strokeWidth={0.9}
+                            strokeOpacity={CONTOUR_OPACITIES[i]}
+                            style={{ pointerEvents: "none" }}
+                          />,
+                        );
+                      }
+                    });
+                  }
+                }
+
+                const gateSvgElements = visibleGates.map((g, idx) => {
                   const color = GATE_COLORS[idx % GATE_COLORS.length]!;
                   const fillAlpha = color + "18";
                   // Narrow previewGate to the correct variant for this gate
@@ -3860,6 +4338,35 @@ export const App: React.FC = () => {
                     );
                   }
 
+                  if (g.type === "ellipse" &&
+                      g.center_x != null && g.center_y != null &&
+                      g.radius_x != null && g.radius_y != null) {
+                    const cxS = toSvgX(g.center_x);
+                    const cyS = toSvgY(g.center_y);
+                    const rxS = Math.abs(plotAreaW * (g.radius_x / spanX));
+                    const ryS = Math.abs(plotAreaH * (g.radius_y / spanY));
+                    const ang = g.angle ?? 0;
+                    // Label above the ellipse top
+                    const labelX = Math.max(ml + 2, Math.min(ml + plotAreaW - 4, cxS - label.length * 2.8));
+                    const labelY = Math.max(mt + 10, cyS - ryS - 4);
+                    return (
+                      <g key={g.id}>
+                        <ellipse
+                          cx={cxS} cy={cyS} rx={rxS} ry={ryS}
+                          transform={ang !== 0 ? `rotate(${ang}, ${cxS}, ${cyS})` : undefined}
+                          fill={fillAlpha} stroke={color} strokeWidth={1.4} strokeDasharray="5 2"
+                          style={{ cursor: "default", pointerEvents: "none" }}
+                        />
+                        <rect x={labelX - 2} y={labelY - 9} width={label.length * 5.6 + 6} height={12}
+                          rx={3} fill="rgba(15,23,42,0.72)" style={{ pointerEvents: "none" }} />
+                        <text x={labelX} y={labelY} fill={color} fontSize={9.5} fontWeight={600}
+                          dominantBaseline="auto" style={{ userSelect: "none", pointerEvents: "none" }}>
+                          {label}
+                        </text>
+                      </g>
+                    );
+                  }
+
                   if (g.type === "polygon" && g.vertices && g.vertices.length >= 3) {
                     // Use preview vertices if a drag is in progress, otherwise use stored vertices
                     const displayVerts = pvPoly?.vertices ?? g.vertices;
@@ -3893,6 +4400,7 @@ export const App: React.FC = () => {
 
                   return null;
                 });
+                return <React.Fragment key="overlay">{contourPaths}{gateSvgElements}</React.Fragment>;
               })()}
               {/* ── Histogram bars (histogram mode only) ── */}
               {plotMode === "histogram" && histData && transformedRange && (() => {
@@ -4031,17 +4539,25 @@ export const App: React.FC = () => {
                   strokeWidth={1.2}
                 />
               )}
-              {drawingRect && (
-                <rect
-                  x={ml + plotAreaW * Math.min(drawingRect.startX, drawingRect.endX)}
-                  y={mt + plotAreaH * (1 - Math.max(drawingRect.startY, drawingRect.endY))}
-                  width={plotAreaW * Math.abs(drawingRect.endX - drawingRect.startX)}
-                  height={plotAreaH * Math.abs(drawingRect.endY - drawingRect.startY)}
-                  fill="rgba(74,222,128,0.15)"
-                  stroke="#4ade80"
-                  strokeWidth={1.5}
-                />
-              )}
+              {drawingRect && (() => {
+                const dLeft = ml + plotAreaW * Math.min(drawingRect.startX, drawingRect.endX);
+                const dTop  = mt + plotAreaH * (1 - Math.max(drawingRect.startY, drawingRect.endY));
+                const dW    = plotAreaW * Math.abs(drawingRect.endX - drawingRect.startX);
+                const dH    = plotAreaH * Math.abs(drawingRect.endY - drawingRect.startY);
+                if (gateTool === "ellipse") {
+                  return (
+                    <ellipse
+                      cx={dLeft + dW / 2} cy={dTop + dH / 2}
+                      rx={Math.max(0, dW / 2)} ry={Math.max(0, dH / 2)}
+                      fill="rgba(74,222,128,0.15)" stroke="#4ade80" strokeWidth={1.5}
+                    />
+                  );
+                }
+                return (
+                  <rect x={dLeft} y={dTop} width={dW} height={dH}
+                    fill="rgba(74,222,128,0.15)" stroke="#4ade80" strokeWidth={1.5} />
+                );
+              })()}
               {plotMode === "points" && points.length === 0 && (
                 <text
                   x={plotW / 2}
@@ -4062,6 +4578,70 @@ export const App: React.FC = () => {
             </svg>
             </div>
           </div>
+          {/* N: Plot PNG export button */}
+          {file && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.3rem" }}>
+              <button
+                type="button"
+                title="Export plot as PNG"
+                onClick={async () => {
+                  const svgEl = plotSvgRef.current;
+                  if (!svgEl) return;
+                  const container = svgEl.parentElement?.parentElement;
+                  const w = svgEl.clientWidth || 800;
+                  const h = svgEl.clientHeight || 600;
+                  const offscreen = document.createElement("canvas");
+                  offscreen.width = w * 2;
+                  offscreen.height = h * 2;
+                  const ctx = offscreen.getContext("2d");
+                  if (!ctx) return;
+                  ctx.scale(2, 2);
+                  // Background
+                  ctx.fillStyle = plotBgMode === "white" ? "#ffffff" : "#0f172a";
+                  ctx.fillRect(0, 0, w, h);
+                  // Composite canvas layers (density / scatter)
+                  if (container) {
+                    const svgRect = svgEl.getBoundingClientRect();
+                    container.querySelectorAll("canvas").forEach((c) => {
+                      const cr = c.getBoundingClientRect();
+                      ctx.drawImage(c, cr.left - svgRect.left, cr.top - svgRect.top, cr.width, cr.height);
+                    });
+                  }
+                  // Draw SVG on top
+                  const svgStr = new XMLSerializer().serializeToString(svgEl);
+                  const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+                  const svgUrl = URL.createObjectURL(blob);
+                  await new Promise<void>((resolve) => {
+                    const img = new Image();
+                    img.onload = () => { ctx.drawImage(img, 0, 0, w, h); URL.revokeObjectURL(svgUrl); resolve(); };
+                    img.onerror = () => { URL.revokeObjectURL(svgUrl); resolve(); };
+                    img.src = svgUrl;
+                  });
+                  offscreen.toBlob((b) => {
+                    if (!b) return;
+                    const url = URL.createObjectURL(b);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    const fname = file?.sample_name ?? "plot";
+                    a.download = `freecyto_${fname.replace(/[^a-zA-Z0-9_-]/g, "_")}.png`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }, "image/png");
+                }}
+                style={{
+                  padding: "0.2rem 0.55rem",
+                  borderRadius: "0.35rem",
+                  border: "1px solid rgba(148,163,184,0.4)",
+                  background: "transparent",
+                  color: "#94a3b8",
+                  fontSize: "0.72rem",
+                  cursor: "pointer",
+                }}
+              >
+                📷 PNG
+              </button>
+            </div>
+          )}
 
           {/* M: Histogram overlay panel — visible only in histogram mode */}
           {file && plotMode === "histogram" && (
@@ -4224,6 +4804,7 @@ export const App: React.FC = () => {
                     setDrawingPolygon(null);
                     setDrawingRect(null);
                   }}
+                  onRenameGate={handleRenameGate}
                 />
               </div>
             )}

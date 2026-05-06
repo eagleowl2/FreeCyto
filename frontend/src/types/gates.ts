@@ -20,6 +20,13 @@ export interface GateNode {
   x_max?: number | null;
   y_max?: number | null;
   vertices?: number[][] | null;
+  expression?: string | null;
+  // N: ellipse gate geometry (all in transformed space)
+  center_x?: number | null;
+  center_y?: number | null;
+  radius_x?: number | null;
+  radius_y?: number | null;
+  angle?: number;
   count: number;
   pct_total: number;
   pct_of_parent: number;

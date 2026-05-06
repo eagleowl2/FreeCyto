@@ -277,6 +277,8 @@ export const App: React.FC = () => {
   const [boolGateName, setBoolGateName] = React.useState("");
   const [boolExpression, setBoolExpression] = React.useState("");
   const [boolGateError, setBoolGateError] = React.useState<string | null>(null);
+  // S-1: ref for cursor-aware gate name insertion into expression
+  const boolExprInputRef = React.useRef<HTMLInputElement>(null);
 
   // L: Derived parameters
   type DerivedParamInfo = { id: string; file_id: string; name: string; expression: string };
@@ -293,6 +295,23 @@ export const App: React.FC = () => {
 
   // O: density contour lines toggle
   const [showContours, setShowContours] = React.useState(false);
+
+  // P-1: Plate layout panel
+  type PlateWellInfo = { well_id: string; row: number; col: number; file_id: string | null; label: string | null };
+  type PlateInfo = { id: string; name: string; rows: number; cols: number; wells: PlateWellInfo[] };
+  type PlateStatWell = { well_id: string; file_id: string | null; label: string | null; row: number; col: number; count: number; pct_of_parent: number; pct_of_total: number; total_events: number };
+  type PlateStatsData = { plate_id: string; plate_name: string; gate_name: string; rows: number; cols: number; wells: PlateStatWell[] };
+  const [plates, setPlates] = React.useState<PlateInfo[]>([]);
+  const [platePanelOpen, setPlatePanelOpen] = React.useState(false);
+  const [activePlateId, setActivePlateId] = React.useState<string | null>(null);
+  const [plateGateName, setPlateGateName] = React.useState("");
+  const [plateStats, setPlateStats] = React.useState<PlateStatsData | null>(null);
+  const [plateStatsLoading, setPlateStatsLoading] = React.useState(false);
+  const [plateCreateName, setPlateCreateName] = React.useState("");
+  const [plateCreateFormat, setPlateCreateFormat] = React.useState("96");
+  const [plateCreateOpen, setPlateCreateOpen] = React.useState(false);
+  const [plateAssignMode, setPlateAssignMode] = React.useState(false);
+  const [plateAssignWellId, setPlateAssignWellId] = React.useState<string | null>(null);
 
   // P-2: plot zoom/pan
   type ZoomState = { xMin: number; xMax: number; yMin: number; yMax: number };
@@ -1061,6 +1080,14 @@ export const App: React.FC = () => {
       .then((data) => { setSavedLayouts(data); })
       .catch(() => { setSavedLayouts([]); });
   }, []);
+
+  // P-1: Fetch plate list on mount and when platePanelOpen
+  React.useEffect(() => {
+    if (!platePanelOpen) return;
+    void getJson<PlateInfo[]>(`${API_BASE}/api/plates`)
+      .then((data) => { setPlates(data); })
+      .catch(() => { setPlates([]); });
+  }, [platePanelOpen]);
 
   // Q-4: Fetch compensation matrix when modal opens
   React.useEffect(() => {
@@ -3519,93 +3546,188 @@ export const App: React.FC = () => {
                     </button>
                   </div>
                 )}
-                {/* L: Boolean gate creation form */}
-                {gateTool === "boolean" && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
-                    <input
-                      type="text"
-                      value={boolGateName}
-                      onChange={(e) => { setBoolGateName(e.target.value); setBoolGateError(null); }}
-                      placeholder="Gate name"
-                      style={{
-                        padding: "0.25rem 0.5rem",
-                        width: "110px",
-                        borderRadius: "0.35rem",
-                        border: "1px solid rgba(148,163,184,0.6)",
-                        background: "rgba(15,23,42,0.8)",
-                        color: "white",
-                        fontSize: "0.8rem",
-                      }}
-                    />
-                    <input
-                      type="text"
-                      value={boolExpression}
-                      onChange={(e) => { setBoolExpression(e.target.value); setBoolGateError(null); }}
-                      placeholder="e.g. GateA AND NOT GateB"
-                      title="AND / OR / NOT operators; use backtick-quotes for gate names with special chars, e.g. `CD4+`"
-                      style={{
-                        padding: "0.25rem 0.5rem",
-                        width: "200px",
-                        borderRadius: "0.35rem",
-                        border: "1px solid rgba(167,139,250,0.5)",
-                        background: "rgba(15,23,42,0.8)",
-                        color: "#c4b5fd",
-                        fontSize: "0.8rem",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!file || !boolExpression.trim()) return;
-                        const name = boolGateName.trim() || "Bool gate";
-                        setBoolGateError(null);
-                        try {
-                          const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
-                            file_id: file.id,
-                            name,
-                            x_channel: "",
-                            y_channel: "",
-                            parent_gate_id: activeGateId,
-                            params: { type: "boolean", expression: boolExpression.trim() },
-                          });
-                          undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
-                          redoStackRef.current = [];
-                          await fetchGateTree(file.id);
-                          setBoolGateName("");
-                          setBoolExpression("");
-                          setGateTool(null);
-                        } catch (e) {
-                          if (e instanceof Error && e.message.startsWith("HTTP 409")) {
-                            setBoolGateError("Name already in use");
-                          } else {
-                            setBoolGateError(e instanceof Error ? e.message : "Failed to create gate");
-                          }
-                        }
-                      }}
-                      disabled={!boolExpression.trim()}
-                      style={{
-                        padding: "0.25rem 0.5rem",
-                        borderRadius: "0.35rem",
-                        border: "none",
-                        fontSize: "0.8rem",
-                        cursor: "pointer",
-                        background: "#8b5cf6",
-                        color: "white",
-                        opacity: !boolExpression.trim() ? 0.6 : 1,
-                      }}
-                    >
-                      Create bool gate
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setGateTool(null); setBoolGateName(""); setBoolExpression(""); setBoolGateError(null); }}
-                      style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "1px solid #6b7280", fontSize: "0.8rem", cursor: "pointer", background: "transparent", color: "#9ca3af" }}
-                    >
-                      Cancel
-                    </button>
-                    {boolGateError && <span style={{ color: "#fca5a5", fontSize: "0.75rem" }}>{boolGateError}</span>}
-                  </div>
-                )}
+                {/* S-1: Boolean gate creation form — expression builder with gate-name chips */}
+                {gateTool === "boolean" && (() => {
+                  /** Insert text at the current cursor position in the expression input. */
+                  const insertAtCursor = (token: string) => {
+                    const input = boolExprInputRef.current;
+                    if (!input) {
+                      setBoolExpression((p) => p ? `${p} ${token}` : token);
+                      return;
+                    }
+                    const start = input.selectionStart ?? boolExpression.length;
+                    const end = input.selectionEnd ?? boolExpression.length;
+                    const before = boolExpression.slice(0, start);
+                    const after = boolExpression.slice(end);
+                    const sep = before && !before.endsWith(" ") ? " " : "";
+                    const sepAfter = after && !after.startsWith(" ") ? " " : "";
+                    const next = before + sep + token + sepAfter + after;
+                    setBoolExpression(next);
+                    setBoolGateError(null);
+                    // Restore focus and move cursor after inserted token
+                    requestAnimationFrame(() => {
+                      input.focus();
+                      const pos = start + sep.length + token.length + sepAfter.length;
+                      input.setSelectionRange(pos, pos);
+                    });
+                  };
+
+                  // Gate names available in this file (not boolean type itself to avoid self-reference)
+                  const availableGateNames = gateList
+                    .filter((g) => g.type !== "boolean")
+                    .map((g) => g.name);
+
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", width: "100%" }}>
+                      {/* Row 1: name + expression + action buttons */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                        <input
+                          type="text"
+                          value={boolGateName}
+                          onChange={(e) => { setBoolGateName(e.target.value); setBoolGateError(null); }}
+                          placeholder="Gate name"
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            width: "110px",
+                            borderRadius: "0.35rem",
+                            border: "1px solid rgba(148,163,184,0.6)",
+                            background: "rgba(15,23,42,0.8)",
+                            color: "white",
+                            fontSize: "0.8rem",
+                          }}
+                        />
+                        <input
+                          ref={boolExprInputRef}
+                          type="text"
+                          value={boolExpression}
+                          onChange={(e) => { setBoolExpression(e.target.value); setBoolGateError(null); }}
+                          placeholder="e.g. Lymphocytes AND NOT Dead"
+                          title="AND / OR / NOT operators. Click gate chips below to insert. Backtick-quote names with spaces: `CD4+ cells`"
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            flex: "1 1 180px",
+                            minWidth: "140px",
+                            borderRadius: "0.35rem",
+                            border: `1px solid ${boolGateError ? "rgba(248,113,113,0.7)" : "rgba(167,139,250,0.5)"}`,
+                            background: "rgba(15,23,42,0.8)",
+                            color: "#c4b5fd",
+                            fontSize: "0.8rem",
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!file || !boolExpression.trim()) return;
+                            const name = boolGateName.trim() || "Bool gate";
+                            setBoolGateError(null);
+                            try {
+                              const created = await postJson<{ id: string }>(`${API_BASE}/api/gates`, {
+                                file_id: file.id,
+                                name,
+                                x_channel: "",
+                                y_channel: "",
+                                parent_gate_id: activeGateId,
+                                params: { type: "boolean", expression: boolExpression.trim() },
+                              });
+                              undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: created.id }];
+                              redoStackRef.current = [];
+                              await fetchGateTree(file.id);
+                              setBoolGateName("");
+                              setBoolExpression("");
+                              setGateTool(null);
+                            } catch (e) {
+                              if (e instanceof Error && e.message.startsWith("HTTP 409")) {
+                                setBoolGateError("Name already in use");
+                              } else {
+                                setBoolGateError(e instanceof Error ? e.message : "Failed to create gate");
+                              }
+                            }
+                          }}
+                          disabled={!boolExpression.trim()}
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            borderRadius: "0.35rem",
+                            border: "none",
+                            fontSize: "0.8rem",
+                            cursor: !boolExpression.trim() ? "not-allowed" : "pointer",
+                            background: "#8b5cf6",
+                            color: "white",
+                            opacity: !boolExpression.trim() ? 0.6 : 1,
+                          }}
+                        >
+                          Create
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setGateTool(null); setBoolGateName(""); setBoolExpression(""); setBoolGateError(null); }}
+                          style={{ padding: "0.25rem 0.5rem", borderRadius: "0.35rem", border: "1px solid #6b7280", fontSize: "0.8rem", cursor: "pointer", background: "transparent", color: "#9ca3af" }}
+                        >
+                          Cancel
+                        </button>
+                        {boolGateError && <span style={{ color: "#fca5a5", fontSize: "0.75rem" }}>{boolGateError}</span>}
+                      </div>
+                      {/* Row 2: operator chips + gate name chips */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", flexWrap: "wrap", paddingLeft: "0.1rem" }}>
+                        <span style={{ fontSize: "0.7rem", color: "#64748b", marginRight: "0.1rem" }}>Insert:</span>
+                        {(["AND", "OR", "NOT"] as const).map((op) => (
+                          <button
+                            key={op}
+                            type="button"
+                            onClick={() => insertAtCursor(op)}
+                            style={{
+                              padding: "0.1rem 0.4rem",
+                              borderRadius: "0.25rem",
+                              border: "1px solid rgba(167,139,250,0.5)",
+                              background: "rgba(139,92,246,0.15)",
+                              color: "#a78bfa",
+                              fontSize: "0.7rem",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                              fontFamily: "monospace",
+                            }}
+                          >
+                            {op}
+                          </button>
+                        ))}
+                        {availableGateNames.length > 0 && (
+                          <span style={{ fontSize: "0.7rem", color: "#475569", margin: "0 0.15rem" }}>|</span>
+                        )}
+                        {availableGateNames.map((gateName) => {
+                          const needsQuote = /[^a-zA-Z0-9_\-]/.test(gateName);
+                          const token = needsQuote ? `\`${gateName}\`` : gateName;
+                          return (
+                            <button
+                              key={gateName}
+                              type="button"
+                              onClick={() => insertAtCursor(token)}
+                              title={needsQuote ? `Inserts: \`${gateName}\`` : `Inserts: ${gateName}`}
+                              style={{
+                                padding: "0.1rem 0.4rem",
+                                borderRadius: "0.25rem",
+                                border: "1px solid rgba(148,163,184,0.35)",
+                                background: "rgba(30,41,59,0.7)",
+                                color: "#93c5fd",
+                                fontSize: "0.7rem",
+                                cursor: "pointer",
+                                maxWidth: "120px",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {gateName}
+                            </button>
+                          );
+                        })}
+                        {availableGateNames.length === 0 && (
+                          <span style={{ fontSize: "0.7rem", color: "#475569", fontStyle: "italic" }}>
+                            No gates yet — create rectangle/polygon gates first
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </>
           )}
@@ -4992,6 +5114,44 @@ export const App: React.FC = () => {
                         ))}
                       </select>
                     )}
+                    {/* S-4: Delete layout button */}
+                    {savedLayouts.length > 0 && (
+                      <select
+                        onChange={async (e) => {
+                          if (!e.target.value) return;
+                          const layoutId = e.target.value;
+                          const layout = savedLayouts.find((l) => l.id === layoutId);
+                          if (!layout) return;
+                          if (!window.confirm(`Delete layout "${layout.name}"?`)) { e.target.value = ""; return; }
+                          try {
+                            const res = await fetch(`${API_BASE}/api/layouts/${encodeURIComponent(layoutId)}`, { method: "DELETE" });
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                            const updated = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
+                            setSavedLayouts(updated);
+                            setGateMessage("✓ Layout deleted");
+                          } catch (err) {
+                            setGateMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+                          }
+                          e.target.value = "";
+                        }}
+                        style={{
+                          padding: "0.2rem 0.4rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(239,68,68,0.35)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(239,68,68,0.08)",
+                          color: "#fca5a5",
+                        }}
+                      >
+                        <option value="">🗑 Delete...</option>
+                        {savedLayouts.map((layout) => (
+                          <option key={layout.id} value={layout.id}>
+                            {layout.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {gateTree.length > 0 && allFiles.length > 1 && (
                       <button
                         type="button"
@@ -5887,6 +6047,365 @@ export const App: React.FC = () => {
           )}
             </div>
           )}
+
+          {/* P-1: Plate layout panel */}
+          <div
+            style={{
+              marginTop: "1rem",
+              borderRadius: "0.75rem",
+              overflow: "hidden",
+              border: "1px solid rgba(251,191,36,0.3)",
+              background: "rgba(15,23,42,0.5)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setPlatePanelOpen((x) => !x)}
+              style={{
+                display: "flex",
+                width: "100%",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0.5rem 0.85rem",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "#e5e7eb",
+                fontSize: "0.78rem",
+                textAlign: "left",
+              }}
+            >
+              <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#fbbf24", fontWeight: 600 }}>
+                🧫 Plate View {plates.length > 0 && <span style={{ color: "#6b7280", fontWeight: 400, textTransform: "none" }}>({plates.length})</span>}
+              </span>
+              <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{platePanelOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {platePanelOpen && (
+              <div style={{ padding: "0 0.85rem 0.85rem" }}>
+                {/* Create plate row */}
+                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.6rem", flexWrap: "wrap" }}>
+                  {!plateCreateOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setPlateCreateOpen(true)}
+                      style={{
+                        padding: "0.2rem 0.5rem",
+                        borderRadius: "0.3rem",
+                        border: "1px solid rgba(251,191,36,0.4)",
+                        background: "rgba(251,191,36,0.1)",
+                        color: "#fbbf24",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                      }}
+                    >
+                      + New plate
+                    </button>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={plateCreateName}
+                        onChange={(e) => setPlateCreateName(e.target.value)}
+                        placeholder="Plate name"
+                        autoFocus
+                        style={{
+                          padding: "0.2rem 0.4rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(251,191,36,0.4)",
+                          background: "rgba(15,23,42,0.8)",
+                          color: "white",
+                          fontSize: "0.75rem",
+                          width: "110px",
+                        }}
+                      />
+                      <select
+                        value={plateCreateFormat}
+                        onChange={(e) => setPlateCreateFormat(e.target.value)}
+                        style={{
+                          padding: "0.2rem 0.3rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(251,191,36,0.3)",
+                          background: "rgba(15,23,42,0.8)",
+                          color: "#fbbf24",
+                          fontSize: "0.75rem",
+                        }}
+                      >
+                        {["6","12","24","48","96"].map((f) => (
+                          <option key={f} value={f}>{f}-well</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={!plateCreateName.trim()}
+                        onClick={async () => {
+                          if (!plateCreateName.trim()) return;
+                          try {
+                            const created = await postJson<PlateInfo>(`${API_BASE}/api/plates`, {
+                              name: plateCreateName.trim(),
+                              format: plateCreateFormat,
+                            });
+                            setPlates((prev) => [...prev, created]);
+                            setActivePlateId(created.id);
+                            setPlateCreateName("");
+                            setPlateCreateOpen(false);
+                          } catch (e) {
+                            setGateMessage(`Error creating plate: ${e instanceof Error ? e.message : String(e)}`);
+                          }
+                        }}
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "0.3rem",
+                          border: "none",
+                          background: "#fbbf24",
+                          color: "#000",
+                          fontSize: "0.75rem",
+                          cursor: plateCreateName.trim() ? "pointer" : "not-allowed",
+                          opacity: plateCreateName.trim() ? 1 : 0.5,
+                          fontWeight: 600,
+                        }}
+                      >
+                        Create
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPlateCreateOpen(false); setPlateCreateName(""); }}
+                        style={{ padding: "0.2rem 0.4rem", borderRadius: "0.3rem", border: "1px solid #6b7280", background: "transparent", color: "#9ca3af", fontSize: "0.75rem", cursor: "pointer" }}
+                      >
+                        ✕
+                      </button>
+                    </>
+                  )}
+                  {plates.length > 1 && (
+                    <select
+                      value={activePlateId ?? ""}
+                      onChange={(e) => { setActivePlateId(e.target.value || null); setPlateStats(null); }}
+                      style={{
+                        padding: "0.2rem 0.4rem",
+                        borderRadius: "0.3rem",
+                        border: "1px solid rgba(251,191,36,0.3)",
+                        background: "rgba(15,23,42,0.8)",
+                        color: "#fbbf24",
+                        fontSize: "0.75rem",
+                      }}
+                    >
+                      {plates.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Active plate grid */}
+                {(() => {
+                  const activePlate = plates.find((p) => p.id === activePlateId);
+                  if (!activePlate) {
+                    if (plates.length === 0) {
+                      return (
+                        <div style={{ fontSize: "0.75rem", color: "#64748b", fontStyle: "italic" }}>
+                          Create a plate to assign samples to wells and compare gate statistics across the plate.
+                        </div>
+                      );
+                    }
+                    return null;
+                  }
+
+                  // Build grid lookup
+                  const statLookup: Record<string, PlateStatWell> = {};
+                  if (plateStats && plateStats.plate_id === activePlateId) {
+                    for (const w of plateStats.wells) statLookup[w.well_id] = w;
+                  }
+                  const maxCount = plateStats ? Math.max(1, ...plateStats.wells.map((w) => w.count)) : 1;
+
+                  return (
+                    <>
+                      {/* Gate stats query row */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+                        <input
+                          type="text"
+                          value={plateGateName}
+                          onChange={(e) => setPlateGateName(e.target.value)}
+                          placeholder="Gate name for heatmap"
+                          list="plate-gate-names"
+                          style={{
+                            padding: "0.2rem 0.4rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(251,191,36,0.4)",
+                            background: "rgba(15,23,42,0.8)",
+                            color: "white",
+                            fontSize: "0.75rem",
+                            flex: "1 1 120px",
+                            minWidth: "100px",
+                          }}
+                        />
+                        <datalist id="plate-gate-names">
+                          {gateList.map((g) => <option key={g.id} value={g.name} />)}
+                        </datalist>
+                        <button
+                          type="button"
+                          disabled={!plateGateName.trim() || plateStatsLoading}
+                          onClick={async () => {
+                            if (!plateGateName.trim() || !activePlateId) return;
+                            setPlateStatsLoading(true);
+                            try {
+                              const stats = await getJson<PlateStatsData>(
+                                `${API_BASE}/api/plates/${encodeURIComponent(activePlateId)}/stats?gate_name=${encodeURIComponent(plateGateName.trim())}`
+                              );
+                              setPlateStats(stats);
+                            } catch (e) {
+                              setGateMessage(`Plate stats error: ${e instanceof Error ? e.message : String(e)}`);
+                            } finally {
+                              setPlateStatsLoading(false);
+                            }
+                          }}
+                          style={{
+                            padding: "0.2rem 0.5rem",
+                            borderRadius: "0.3rem",
+                            border: "none",
+                            background: "#fbbf24",
+                            color: "#000",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            fontWeight: 600,
+                            opacity: (!plateGateName.trim() || plateStatsLoading) ? 0.5 : 1,
+                          }}
+                        >
+                          {plateStatsLoading ? "…" : "Heatmap"}
+                        </button>
+                        {/* Delete plate button */}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!window.confirm(`Delete plate "${activePlate.name}"?`)) return;
+                            try {
+                              await fetch(`${API_BASE}/api/plates/${encodeURIComponent(activePlateId ?? "")}`, { method: "DELETE" });
+                              setPlates((prev) => prev.filter((p) => p.id !== activePlateId));
+                              setActivePlateId(null);
+                              setPlateStats(null);
+                            } catch (e) {
+                              setGateMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+                            }
+                          }}
+                          style={{ padding: "0.2rem 0.4rem", borderRadius: "0.3rem", border: "1px solid rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontSize: "0.72rem", cursor: "pointer" }}
+                        >
+                          🗑
+                        </button>
+                      </div>
+
+                      {/* Plate grid */}
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ borderCollapse: "collapse", fontSize: "0.65rem", tableLayout: "fixed" }}>
+                          <thead>
+                            <tr>
+                              <th style={{ width: "1.4rem", padding: "0.1rem" }} />
+                              {Array.from({ length: activePlate.cols }, (_, c) => (
+                                <th key={c} style={{ width: "2.0rem", textAlign: "center", color: "#64748b", padding: "0.1rem", fontWeight: 500 }}>
+                                  {c + 1}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Array.from({ length: activePlate.rows }, (_, r) => {
+                              const rowLetter = "ABCDEFGHIJKLMNOP"[r] ?? String(r + 1);
+                              return (
+                                <tr key={r}>
+                                  <td style={{ color: "#64748b", textAlign: "right", paddingRight: "0.2rem", fontWeight: 500 }}>
+                                    {rowLetter}
+                                  </td>
+                                  {Array.from({ length: activePlate.cols }, (_, c) => {
+                                    const wid = `${rowLetter}${c + 1}`;
+                                    const well = activePlate.wells.find((w) => w.well_id === wid);
+                                    const stat = statLookup[wid];
+                                    const hasFile = !!well?.file_id;
+                                    const intensity = stat && stat.count > 0 ? stat.count / maxCount : 0;
+                                    // Color: amber heat-map (0→dark, 1→bright amber)
+                                    const bgAlpha = 0.1 + intensity * 0.75;
+                                    const bg = hasFile
+                                      ? stat
+                                        ? `rgba(251,191,36,${bgAlpha.toFixed(2)})`
+                                        : "rgba(71,85,105,0.6)"
+                                      : "rgba(15,23,42,0.4)";
+                                    const label = well?.label ?? (well?.file_id ? (allFiles.find((f) => f.id === well.file_id)?.sample_name ?? well.file_id.slice(0, 6)) : "");
+                                    const tooltipText = well?.file_id
+                                      ? stat
+                                        ? `${wid}: ${stat.count.toLocaleString()} (${stat.pct_of_parent.toFixed(1)}% parent)`
+                                        : `${wid}: ${label || well.file_id.slice(0, 8)}`
+                                      : `${wid}: empty`;
+                                    return (
+                                      <td
+                                        key={c}
+                                        title={tooltipText}
+                                        onClick={() => {
+                                          // Clicking a well in assign mode sets file_id from current file
+                                          if (!file || !activePlateId) return;
+                                          const winfo = activePlate.wells.find((w) => w.well_id === wid);
+                                          const alreadyAssigned = winfo?.file_id === file.id;
+                                          void (async () => {
+                                            try {
+                                              const updated = await postJson<PlateInfo>(
+                                                `${API_BASE}/api/plates/${encodeURIComponent(activePlateId)}/wells/${encodeURIComponent(wid)}`,
+                                                { well_id: wid, file_id: alreadyAssigned ? null : file.id, label: alreadyAssigned ? null : (file.sample_name ?? null) }
+                                              );
+                                              setPlates((prev) => prev.map((p) => p.id === activePlateId ? updated : p));
+                                              setPlateStats(null); // reset stats after assignment change
+                                            } catch (e) {
+                                              setGateMessage(`Well assign error: ${e instanceof Error ? e.message : String(e)}`);
+                                            }
+                                          })();
+                                        }}
+                                        style={{
+                                          width: "2.0rem",
+                                          height: "1.6rem",
+                                          background: bg,
+                                          border: well?.file_id === file?.id
+                                            ? "1.5px solid #fbbf24"
+                                            : "1px solid rgba(71,85,105,0.5)",
+                                          borderRadius: "0.2rem",
+                                          textAlign: "center",
+                                          verticalAlign: "middle",
+                                          cursor: file ? "pointer" : "default",
+                                          color: intensity > 0.5 ? "#000" : "#94a3b8",
+                                          fontSize: "0.6rem",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                          maxWidth: "2.0rem",
+                                          padding: "0",
+                                          transition: "background 0.15s",
+                                        }}
+                                      >
+                                        {stat ? stat.count > 0 ? stat.count >= 1000 ? `${(stat.count / 1000).toFixed(1)}k` : stat.count : "" : label ? label.slice(0, 3) : ""}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      {/* Legend */}
+                      {plateStats && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.4rem", fontSize: "0.65rem", color: "#64748b" }}>
+                          <div style={{ width: "0.8rem", height: "0.8rem", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(71,85,105,0.5)", borderRadius: "0.1rem" }} />
+                          <span>0</span>
+                          <div style={{ width: "0.8rem", height: "0.8rem", background: "rgba(251,191,36,0.85)", border: "1px solid rgba(71,85,105,0.5)", borderRadius: "0.1rem" }} />
+                          <span>{Math.max(...plateStats.wells.map((w) => w.count)).toLocaleString()}</span>
+                          <span style={{ marginLeft: "0.5rem" }}>Click well to assign current file · hover for details</span>
+                        </div>
+                      )}
+                      {!plateStats && file && (
+                        <div style={{ fontSize: "0.68rem", color: "#64748b", marginTop: "0.35rem" }}>
+                          Click a well to assign the current file ({file.sample_name}). Then enter a gate name and click Heatmap.
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
 
           {/* Q-4: Compensation summary popover (compact, ~220px wide) */}
           {compensationModalOpen && (

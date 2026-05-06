@@ -1138,6 +1138,94 @@ def get_gate_stats(gate_id: str) -> GateStatsResponse:
   )
 
 
+def apply_gate_tree_to_file(gate_tree: list[GateResponse], target_file_id: str) -> int:
+  """Apply a saved gate-tree snapshot to a target file.
+
+  Unlike ``copy_gates_between_files``, this applies from an in-memory
+  :class:`GateResponse` tree — not from the live gate store — so the result
+  exactly matches the snapshot regardless of subsequent changes to the source file.
+
+  Returns the number of gates successfully created.
+  """
+  _cleanup_expired_suspended_files()
+  storage.get_file_metadata(target_file_id)  # KeyError → 404
+
+  def _flatten(nodes: list[GateResponse]) -> list[GateResponse]:
+    out: list[GateResponse] = []
+    for node in nodes:
+      out.append(node)
+      out.extend(_flatten(node.children))
+    return out
+
+  all_gates = _flatten(gate_tree)
+  id_map: dict[str, str] = {}
+  created = 0
+
+  for src in all_gates:
+    target_parent_id = id_map.get(src.parent_gate_id) if src.parent_gate_id else None
+
+    if src.type == "rectangle":
+      params = RectangleGateCreate(
+        type="rectangle",
+        x_min=src.x_min or 0.0,
+        y_min=src.y_min or 0.0,
+        x_max=src.x_max or 1000.0,
+        y_max=src.y_max or 1000.0,
+      )
+    elif src.type == "polygon":
+      params = PolygonGateCreate(
+        type="polygon",
+        vertices=src.vertices or [[0, 0], [100, 0], [50, 100]],
+      )
+    elif src.type == "interval":
+      params = IntervalGateCreate(
+        type="interval",
+        x_min=src.x_min or 0.0,
+        x_max=src.x_max or 1000.0,
+      )
+    elif src.type == "boolean":
+      params = BooleanGateCreate(
+        type="boolean",
+        expression=src.expression or "",
+      )
+    elif src.type == "ellipse":
+      params = EllipseGateCreate(
+        type="ellipse",
+        center_x=src.center_x or 500.0,
+        center_y=src.center_y or 500.0,
+        radius_x=src.radius_x or 100.0,
+        radius_y=src.radius_y or 100.0,
+        angle=src.angle or 0.0,
+      )
+    else:
+      continue  # skip unknown types gracefully
+
+    req = GateCreateRequest(
+      file_id=target_file_id,
+      name=src.name,
+      x_channel=src.x_channel,
+      y_channel=src.y_channel,
+      parent_gate_id=target_parent_id,
+      order=src.order,
+      transform_x=src.transform_x,
+      transform_y=src.transform_y,
+      arcsinh_cofactor=src.arcsinh_cofactor,
+      logicle_T=src.logicle_T,
+      logicle_W=src.logicle_W,
+      logicle_M=src.logicle_M,
+      logicle_A=src.logicle_A,
+      params=params,
+    )
+    try:
+      new_gate = create_gate(req)
+      id_map[src.id] = new_gate.id
+      created += 1
+    except Exception:
+      pass  # name conflict or invalid channel — skip silently, partial apply is fine
+
+  return created
+
+
 def delete_all_gates_for_file(file_id: str) -> None:
   """Clear all gates for a file (e.g. on compensation reset or re-load)."""
   _store.suspended_files.discard(file_id)

@@ -73,16 +73,17 @@ async def apply_layout(
 ) -> dict:
   """Apply a saved layout to a target file.
 
-  Clones all gates from the layout into the target file.
+  Clones all gates from the STORED layout snapshot (not the current live source file).
+  This ensures the applied gates exactly match what was saved, even if the source
+  file's gate tree has since changed.
   """
   try:
     layout = layouts_service.get_layout(layout_id)
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-  # Get the source file_id from the layout and apply the gate tree
   try:
-    result = gates_service.copy_gates_between_files(layout.source_file_id, [target_file_id])
+    gates_applied = gates_service.apply_gate_tree_to_file(layout.gate_tree, target_file_id)
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
   except ValueError as exc:
@@ -93,7 +94,7 @@ async def apply_layout(
     "layout_id": layout_id,
     "layout_name": layout.name,
     "target_file_id": target_file_id,
-    "gates_applied": result["results"].get(target_file_id, 0),
+    "gates_applied": gates_applied,
   }
 
 

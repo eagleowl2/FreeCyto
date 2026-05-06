@@ -2687,247 +2687,41 @@ export const App: React.FC = () => {
                 </label>
               </div>
 
-              {/* J-2: Spillover table editor */}
+              {/* J-2: Compact compensation status bar — full editor lives in the modal */}
               <div
                 style={{
                   marginTop: "0.4rem",
                   marginBottom: "0.7rem",
-                  fontSize: "0.8rem",
-                  color: "#9ca3af",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  flexWrap: "wrap",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.4rem" }}>
-                  <strong>Compensation (optional)</strong>
-                  {file && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await loadSpilloverFromFile(file.id);
-                        setCompStatus("idle");
-                        setCompError(null);
-                      }}
-                      style={{
-                        padding: "0.2rem 0.5rem",
-                        borderRadius: "0.4rem",
-                        border: "1px solid rgba(74,222,128,0.6)",
-                        fontSize: "0.75rem",
-                        cursor: "pointer",
-                        background: "rgba(34,197,94,0.15)",
-                        color: "#4ade80",
-                      }}
-                    >
-                      Load from file
-                    </button>
-                  )}
-                </div>
-                {spillChNames.length > 0 ? (
-                  <div style={{ overflowX: "auto", marginBottom: "0.4rem" }}>
-                    <table style={{ borderCollapse: "collapse", fontSize: "0.72rem" }}>
-                      <thead>
-                        <tr>
-                          <td style={{ minWidth: "12px" }} />
-                          {spillChNames.map((name, j) => (
-                            <th key={j} style={{ padding: "0 0.2rem 0.2rem", fontWeight: "normal" }}>
-                              <input
-                                value={name}
-                                onChange={(e) => {
-                                  const next = [...spillChNames];
-                                  next[j] = e.target.value;
-                                  setSpillChNames(next);
-                                  setCompStatus("idle");
-                                  setCompError(null);
-                                }}
-                                style={{
-                                  width: "68px",
-                                  background: "rgba(15,23,42,0.7)",
-                                  border: "1px solid rgba(148,163,184,0.4)",
-                                  borderRadius: "0.3rem",
-                                  color: "#c7d2fe",
-                                  fontSize: "0.7rem",
-                                  padding: "0.15rem 0.25rem",
-                                  textAlign: "center",
-                                }}
-                              />
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {spillMatrix.map((row, i) => (
-                          <tr key={i}>
-                            <td style={{ color: "#6b7280", paddingRight: "0.3rem", fontSize: "0.68rem", whiteSpace: "nowrap", maxWidth: "68px", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {spillChNames[i] ?? ""}
-                            </td>
-                            {row.map((val, j) => (
-                              <td key={j} style={{ padding: "0.1rem 0.15rem" }}>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={val}
-                                  onChange={(e) => {
-                                    const next = spillMatrix.map((r) => [...r]);
-                                    next[i][j] = e.target.value;
-                                    setSpillMatrix(next);
-                                    setCompStatus("idle");
-                                    setCompError(null);
-                                  }}
-                                  style={{
-                                    width: "68px",
-                                    background: i === j ? "rgba(34,197,94,0.08)" : "rgba(15,23,42,0.7)",
-                                    border: "1px solid rgba(148,163,184,0.3)",
-                                    borderRadius: "0.3rem",
-                                    color: "white",
-                                    fontSize: "0.72rem",
-                                    padding: "0.15rem 0.25rem",
-                                    textAlign: "center",
-                                  }}
-                                />
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                <span style={{ fontSize: "0.78rem", color: "#9ca3af", fontWeight: 500 }}>Compensation:</span>
+                {isCompensated ? (
+                  <span style={{ fontSize: "0.78rem", color: "#4ade80" }}>
+                    ✓ Applied{compCond != null && ` — κ=${compCond.toFixed(1)}`}
+                  </span>
                 ) : (
-                  <div style={{ marginBottom: "0.4rem", color: "#4b5563", fontStyle: "italic", fontSize: "0.78rem" }}>
-                    No spillover loaded — click &quot;Load from file&quot; to auto-populate from the FCS header.
-                  </div>
+                  <span style={{ fontSize: "0.78rem", color: "#64748b", fontStyle: "italic" }}>not applied</span>
                 )}
-                <div
+                <button
+                  type="button"
+                  onClick={() => setCompensationFullMatrixOpen(true)}
                   style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginTop: "0.35rem",
-                    gap: "0.5rem",
+                    padding: "0.2rem 0.55rem",
+                    borderRadius: "0.35rem",
+                    border: "1px solid rgba(168,85,247,0.45)",
+                    background: "rgba(168,85,247,0.12)",
+                    color: "#d8b4fe",
+                    fontSize: "0.73rem",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                  <button
-                    type="button"
-                    disabled={compStatus === "applying" || spillMatrix.length === 0}
-                    onClick={async () => {
-                      if (!file) return;
-                      setCompStatus("applying");
-                      setCompError(null);
-                      try {
-                        const rows = spillMatrix.map((row) =>
-                          row.map((v) => {
-                            const n = Number(v);
-                            if (!Number.isFinite(n)) throw new Error(`Invalid cell value: "${v}"`);
-                            return n;
-                          }),
-                        );
-                        if (!rows.length) throw new Error("Compensation matrix is empty");
-                        const n = rows[0].length;
-                        if (!rows.every((r) => r.length === n)) throw new Error("Matrix rows have inconsistent lengths");
-                        if (rows.length !== n) throw new Error("Matrix must be square (rows !== columns)");
-                        // E-2: capture condition number from apply response
-                        type CompApplyResp = { file_id: string; n_channels: number; cond?: number | null };
-                        const body: { file_id: string; spillover: number[][]; channel_names?: string[] } = {
-                          file_id: file.id,
-                          spillover: rows,
-                        };
-                        // J-2: send channel_names for partial-channel compensation when available
-                        if (spillChNames.length === n) body.channel_names = spillChNames;
-                        const applyResp = await postJson<CompApplyResp>(`${API_BASE}/api/compensation/apply`, body);
-                        setCompCond(applyResp?.cond ?? null);
-                        setIsCompensated(true);
-                        setCompStatus("success");
-                        const pg = ++plotRequestGenerationRef.current;
-                        if (plotMode === "density") {
-                          await fetchDensityAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
-                        } else {
-                          await fetchEventsAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
-                        }
-                      } catch (err) {
-                        setCompStatus("error");
-                        setCompError(err instanceof Error ? err.message : String(err));
-                      }
-                    }}
-                    style={{
-                      padding: "0.35rem 0.8rem",
-                      borderRadius: "999px",
-                      border: "none",
-                      fontSize: "0.8rem",
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      background: "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
-                      color: "white",
-                      opacity: compStatus === "applying" ? 0.7 : 1,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {compStatus === "applying" ? "Applying…" : "Apply compensation"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!file || compStatus === "applying"}
-                    onClick={async () => {
-                      if (!file) return;
-                      setCompStatus("applying");
-                      setCompError(null);
-                      try {
-                        const res = await fetch(
-                          `${API_BASE}/api/compensation/${encodeURIComponent(file.id)}`,
-                          { method: "DELETE" },
-                        );
-                        if (!res.ok) {
-                          const t = await res.text();
-                          throw new Error(t || `HTTP ${res.status}`);
-                        }
-                        // E-2: clear condition number and badge on reset
-                        setCompCond(null);
-                        setIsCompensated(false);
-                        setCompStatus("idle");
-                        setCompError(null);
-                        const pg = ++plotRequestGenerationRef.current;
-                        if (plotMode === "density") {
-                          await fetchDensityAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
-                        } else {
-                          await fetchEventsAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
-                        }
-                      } catch (err) {
-                        setCompStatus("error");
-                        setCompError(err instanceof Error ? err.message : String(err));
-                      }
-                    }}
-                    style={{
-                      padding: "0.35rem 0.8rem",
-                      borderRadius: "999px",
-                      border: "1px solid rgba(148,163,184,0.6)",
-                      fontSize: "0.8rem",
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      background: "transparent",
-                      color: "#94a3b8",
-                    }}
-                  >
-                    Reset compensation
-                  </button>
-                  </div>
-                  <div style={{ fontSize: "0.8rem" }}>
-                    {compStatus === "success" && (
-                      <span style={{ color: "#4ade80" }}>
-                        Applied
-                        {compCond != null && (
-                          // E-2: condition number — green <10 (well-conditioned), yellow 10–100, red >100
-                          <span style={{
-                            marginLeft: "0.4rem",
-                            color: compCond < 10 ? "#4ade80" : compCond < 100 ? "#fbbf24" : "#f87171",
-                          }}>
-                            {`κ=${compCond.toFixed(1)}`}
-                          </span>
-                        )}
-                      </span>
-                    )}
-                    {compStatus === "error" && compError && (
-                      <span style={{ color: "#fca5a5" }}>{compError}</span>
-                    )}
-                  </div>
-                </div>
+                  🔬 {spillMatrix.length > 0 ? "Edit matrix" : "Load & apply"}
+                </button>
               </div>
             </>
           )}
@@ -6590,85 +6384,281 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {/* Q-4b: Full matrix modal (only shown when explicitly requested) */}
-          {compensationFullMatrixOpen && spilloverData && (
+          {/* Q-4b: Compensation editor modal — full editable matrix + Apply/Reset */}
+          {compensationFullMatrixOpen && (
             <div
               style={{
                 position: "fixed",
                 inset: 0,
-                background: "rgba(0,0,0,0.5)",
+                background: "rgba(0,0,0,0.55)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 zIndex: 10000,
-                backdropFilter: "blur(2px)",
+                backdropFilter: "blur(3px)",
               }}
               onClick={() => setCompensationFullMatrixOpen(false)}
             >
               <div
                 style={{
                   background: "#0f172a",
-                  border: "1px solid rgba(148,163,184,0.3)",
-                  borderRadius: "0.5rem",
+                  border: "1px solid rgba(168,85,247,0.4)",
+                  borderRadius: "0.6rem",
                   padding: "1.25rem",
-                  maxWidth: "min(90vw, 800px)",
-                  maxHeight: "85vh",
+                  maxWidth: "min(92vw, 860px)",
+                  maxHeight: "88vh",
                   overflowY: "auto",
-                  boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                  boxShadow: "0 24px 48px rgba(0,0,0,0.6)",
                   width: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.75rem",
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                {/* Header */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "#e5e7eb" }}>
-                    Compensation Matrix — Full View
+                    🔬 Compensation Matrix Editor
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setCompensationFullMatrixOpen(false)}
-                    style={{ background: "none", border: "none", color: "#64748b", fontSize: "1.2rem", cursor: "pointer", padding: "0.2rem 0.4rem" }}
-                  >
-                    ✕
-                  </button>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    {/* Load from file */}
+                    {file && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await loadSpilloverFromFile(file.id);
+                          setCompStatus("idle");
+                          setCompError(null);
+                        }}
+                        style={{
+                          padding: "0.3rem 0.6rem",
+                          borderRadius: "0.35rem",
+                          border: "1px solid rgba(74,222,128,0.5)",
+                          background: "rgba(34,197,94,0.12)",
+                          color: "#4ade80",
+                          fontSize: "0.78rem",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        ↓ Load from file
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setCompensationFullMatrixOpen(false)}
+                      style={{ background: "none", border: "none", color: "#64748b", fontSize: "1.25rem", cursor: "pointer", padding: "0.1rem 0.3rem", lineHeight: 1 }}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
-                <div style={{ overflowX: "auto", fontSize: "0.75rem" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", color: "#cbd5e1" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.2)" }}>
-                        <th style={{ padding: "0.4rem 0.5rem", textAlign: "left", color: "#9ca3af", fontWeight: 500 }}>Detector</th>
-                        {spilloverData.channel_names.map((ch) => (
-                          <th key={ch} style={{ padding: "0.4rem 0.5rem", textAlign: "right", color: "#9ca3af", fontWeight: 500 }}>
-                            {ch}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {spilloverData.channel_names.map((rowCh, i) => (
-                        <tr key={rowCh} style={{ background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.03)" }}>
-                          <td style={{ padding: "0.3rem 0.5rem", fontWeight: 500 }}>{rowCh}</td>
-                          {spilloverData.matrix[i]!.map((val, j) => (
-                            <td
-                              key={`${i}-${j}`}
-                              style={{
-                                padding: "0.3rem 0.5rem",
-                                textAlign: "right",
-                                fontVariantNumeric: "tabular-nums",
-                                color: i === j ? "#86efac" : val > 0.05 ? "#fbbf24" : val > 0 ? "#cbd5e1" : "#4b5563",
-                              }}
-                            >
-                              {(val * 100).toFixed(1)}%
-                            </td>
+
+                {/* Editable matrix */}
+                {spillMatrix.length > 0 ? (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ borderCollapse: "collapse", fontSize: "0.72rem" }}>
+                      <thead>
+                        <tr>
+                          <th style={{ minWidth: "72px", padding: "0 0.2rem 0.3rem", color: "#6b7280", fontWeight: 500, textAlign: "left" }}>Detector ↓</th>
+                          {spillChNames.map((name, j) => (
+                            <th key={j} style={{ padding: "0 0.2rem 0.3rem", fontWeight: "normal" }}>
+                              <input
+                                value={name}
+                                onChange={(e) => {
+                                  const next = [...spillChNames];
+                                  next[j] = e.target.value;
+                                  setSpillChNames(next);
+                                  setCompStatus("idle");
+                                  setCompError(null);
+                                }}
+                                style={{
+                                  width: "72px",
+                                  background: "rgba(15,23,42,0.7)",
+                                  border: "1px solid rgba(148,163,184,0.35)",
+                                  borderRadius: "0.25rem",
+                                  color: "#c7d2fe",
+                                  fontSize: "0.68rem",
+                                  padding: "0.15rem 0.25rem",
+                                  textAlign: "center",
+                                }}
+                              />
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{ marginTop: "0.75rem", fontSize: "0.7rem", color: "#6b7280", fontStyle: "italic" }}>
-                  Diagonal = detector sensitivity • <span style={{ color: "#86efac" }}>■</span> diagonal,{" "}
-                  <span style={{ color: "#fbbf24" }}>■</span> spillover &gt;5%
-                </div>
+                      </thead>
+                      <tbody>
+                        {spillMatrix.map((row, i) => (
+                          <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.03)" }}>
+                            <td style={{ color: "#6b7280", paddingRight: "0.4rem", fontSize: "0.68rem", whiteSpace: "nowrap", maxWidth: "72px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {spillChNames[i] ?? ""}
+                            </td>
+                            {row.map((val, j) => (
+                              <td key={j} style={{ padding: "0.1rem 0.15rem" }}>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={val}
+                                  onChange={(e) => {
+                                    const next = spillMatrix.map((r) => [...r]);
+                                    next[i][j] = e.target.value;
+                                    setSpillMatrix(next);
+                                    setCompStatus("idle");
+                                    setCompError(null);
+                                  }}
+                                  style={{
+                                    width: "72px",
+                                    background: i === j ? "rgba(34,197,94,0.1)" : "rgba(15,23,42,0.7)",
+                                    border: `1px solid ${i === j ? "rgba(74,222,128,0.4)" : "rgba(148,163,184,0.25)"}`,
+                                    borderRadius: "0.25rem",
+                                    color: "white",
+                                    fontSize: "0.7rem",
+                                    padding: "0.15rem 0.25rem",
+                                    textAlign: "center",
+                                  }}
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ marginTop: "0.5rem", fontSize: "0.65rem", color: "#475569" }}>
+                      <span style={{ color: "#86efac" }}>■</span> diagonal (self),{" "}
+                      values = fraction of signal that spills into each detector
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: "center", padding: "2rem 1rem", color: "#4b5563", fontSize: "0.8rem" }}>
+                    <div style={{ marginBottom: "0.5rem" }}>No spillover matrix loaded.</div>
+                    {file && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await loadSpilloverFromFile(file.id);
+                          setCompStatus("idle");
+                        }}
+                        style={{
+                          padding: "0.4rem 0.9rem",
+                          borderRadius: "0.4rem",
+                          border: "1px solid rgba(74,222,128,0.5)",
+                          background: "rgba(34,197,94,0.15)",
+                          color: "#4ade80",
+                          fontSize: "0.8rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ↓ Load from FCS file header
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Action row: Apply + Reset + status */}
+                {spillMatrix.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", borderTop: "1px solid rgba(148,163,184,0.15)", paddingTop: "0.75rem" }}>
+                    <button
+                      type="button"
+                      disabled={compStatus === "applying"}
+                      onClick={async () => {
+                        if (!file) return;
+                        setCompStatus("applying");
+                        setCompError(null);
+                        try {
+                          const rows = spillMatrix.map((row) =>
+                            row.map((v) => {
+                              const n = Number(v);
+                              if (!Number.isFinite(n)) throw new Error(`Invalid value: "${v}"`);
+                              return n;
+                            }),
+                          );
+                          if (!rows.length) throw new Error("Matrix is empty");
+                          const n = rows[0].length;
+                          if (!rows.every((r) => r.length === n)) throw new Error("Inconsistent row lengths");
+                          if (rows.length !== n) throw new Error("Matrix must be square");
+                          type CompApplyResp = { file_id: string; n_channels: number; cond?: number | null };
+                          const body: { file_id: string; spillover: number[][]; channel_names?: string[] } = { file_id: file.id, spillover: rows };
+                          if (spillChNames.length === n) body.channel_names = spillChNames;
+                          const applyResp = await postJson<CompApplyResp>(`${API_BASE}/api/compensation/apply`, body);
+                          setCompCond(applyResp?.cond ?? null);
+                          setIsCompensated(true);
+                          setCompStatus("success");
+                          setCompensationFullMatrixOpen(false);
+                          const pg = ++plotRequestGenerationRef.current;
+                          if (plotMode === "density") {
+                            await fetchDensityAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
+                          } else {
+                            await fetchEventsAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
+                          }
+                        } catch (err) {
+                          setCompStatus("error");
+                          setCompError(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
+                      style={{
+                        padding: "0.4rem 1rem",
+                        borderRadius: "999px",
+                        border: "none",
+                        fontSize: "0.82rem",
+                        fontWeight: 600,
+                        cursor: compStatus === "applying" ? "not-allowed" : "pointer",
+                        background: "linear-gradient(135deg, #22c55e, #16a34a)",
+                        color: "white",
+                        opacity: compStatus === "applying" ? 0.7 : 1,
+                      }}
+                    >
+                      {compStatus === "applying" ? "Applying…" : "✓ Apply compensation"}
+                    </button>
+                    {isCompensated && (
+                      <button
+                        type="button"
+                        disabled={compStatus === "applying"}
+                        onClick={async () => {
+                          if (!file) return;
+                          setCompStatus("applying");
+                          try {
+                            const res = await fetch(`${API_BASE}/api/compensation/${encodeURIComponent(file.id)}`, { method: "DELETE" });
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                            setCompCond(null);
+                            setIsCompensated(false);
+                            setCompStatus("idle");
+                            setCompError(null);
+                            setCompensationFullMatrixOpen(false);
+                            const pg = ++plotRequestGenerationRef.current;
+                            if (plotMode === "density") {
+                              await fetchDensityAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
+                            } else {
+                              await fetchEventsAndPlot(file.id, xChannel, yChannel, transformX, transformY, pg);
+                            }
+                          } catch (err) {
+                            setCompStatus("error");
+                            setCompError(err instanceof Error ? err.message : String(err));
+                          }
+                        }}
+                        style={{
+                          padding: "0.4rem 0.85rem",
+                          borderRadius: "999px",
+                          border: "1px solid rgba(148,163,184,0.5)",
+                          background: "transparent",
+                          color: "#94a3b8",
+                          fontSize: "0.82rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Reset
+                      </button>
+                    )}
+                    {compStatus === "success" && (
+                      <span style={{ fontSize: "0.78rem", color: "#4ade80" }}>
+                        ✓ Applied{compCond != null && ` — κ=${compCond.toFixed(1)}`}
+                      </span>
+                    )}
+                    {compStatus === "error" && compError && (
+                      <span style={{ fontSize: "0.75rem", color: "#fca5a5" }}>{compError}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

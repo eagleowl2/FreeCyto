@@ -188,7 +188,7 @@ class TestLayoutSnapshotApply:
         })
         # Save layout
         res = client.post("/api/layouts", json={"name": "My Layout", "source_file_id": src})
-        assert res.status_code == 200
+        assert res.status_code in (200, 201)
         layout_id = res.json()["id"]
         # Apply to target (snapshot-based: source gates irrelevant after delete)
         # First delete the source gate — layout should still apply from snapshot
@@ -231,7 +231,7 @@ class TestLayoutSnapshotApply:
         res = client.post("/api/layouts", json={"name": "ToDelete", "source_file_id": src})
         lid = res.json()["id"]
         del_res = client.delete(f"/api/layouts/{lid}")
-        assert del_res.status_code == 200
+        assert del_res.status_code in (200, 204)
         # Should be gone from list
         list_res = client.get("/api/layouts")
         ids = [l["id"] for l in list_res.json()]

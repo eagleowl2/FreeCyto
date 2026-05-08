@@ -1,6 +1,46 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑05‑08 (Phase S — Complete — Boolean gates, layout snapshots, plate processing)
+> Last updated: 2026‑05‑08 (Phase T — Complete — Table Editor + Experiment/Group/Sample hierarchy)
+
+---
+
+## 2026‑05‑08 — Phase T: Table Editor + Experiment Hierarchy Persistence
+
+**Scope:** FlowJo-like Experiment → Group → Sample hierarchy with disk persistence; three table views (batch stats, plate wells, population); full CSV export; sidebar tree navigation; React context layer.
+
+### Backend
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **T-1** | `backend/models/experiment_models.py` | New Pydantic v2 models: `SampleMeta`, `SampleRecord`, `GroupRecord`, `ExperimentRecord` (internal storage); `SampleResponse`, `GroupResponse`, `ExperimentResponse`, `ExperimentListItem` (API shapes); `*CreateRequest` / `*UpdateRequest` variants for all three levels. All dates use `datetime.utcnow()` defaults. |
+| **T-2** | `backend/models/table_models.py` | New Pydantic models: `GateStatCell`, `BatchStatsRow/Table`; `PlateWellRow/Table`; `PopStatsRow/Table`; `TableExportRequest`. |
+| **T-3** | `backend/services/experiment_service.py` | `ExperimentStore` — thread-safe (`threading.Lock`) in-memory store backed by `~/.freecyto/experiments.json` (serialised on every write, loaded at startup). Methods: `create/list/get/update/delete_experiment`, `add/get/update/delete_group`, `add/get/update/delete_sample`, `move_sample` (between groups within same experiment), `get_all_samples_for_experiment`. `reset_experiment_store()` helper for tests. Module-level singleton via `get_store()`. |
+| **T-4** | `backend/routers/experiments.py` | REST CRUD: `POST /api/experiments` (201), `GET /api/experiments`, `GET /api/experiments/{id}`, `PUT /api/experiments/{id}`, `DELETE /api/experiments/{id}` (204). Groups: `POST .../groups` (201), `PUT .../groups/{id}`, `DELETE .../groups/{id}` (204). Samples: `POST .../groups/{id}/samples` (201), `GET/PUT .../samples/{id}`, `DELETE .../samples/{id}` (204), `POST .../samples/{id}/move`. |
+| **T-5** | `backend/routers/tables.py` | `GET /api/tables/batch-stats/{exp_id}?gate_names=A,B` — samples×gates table; DFS gate search per file; zero-fills missing gates. `GET /api/tables/plate-wells/{plate_id}?gate_name=X` — well grid with optional gate stats. `GET /api/tables/population/{gate_id}` — per-channel stats (MFI, median, SD, CV%, geo-mean) using numpy on gated events. `POST /api/tables/export` — dispatches to any table type and streams CSV. |
+| **T-6** | `backend/services/gates.py` | Added two public helpers: `get_gate_by_id(gate_id) -> GateResponse` (used by population table); `get_gate_mask(gate_id) -> np.ndarray` (boolean mask of events inside gate, used by population stats). Both raise `KeyError` for unknown gates and call cleanup on expired suspended files. |
+| **T-7** | `backend/routers/__init__.py` | Registered `experiments` and `tables` routers into `api_router`. |
+| **T-8** | `backend/tests/test_phase_t.py` | **42 new tests** across 5 test classes: `TestExperimentCRUD` (9), `TestGroupCRUD` (4), `TestSampleCRUD` (6), `TestBatchStatsTable` (5), `TestPlateWellTable` (4), `TestPopulationStatsTable` (4), `TestTableExport` (8) — plus shared `make_file` / `make_rect_gate` helpers and `autouse` store-reset fixture. |
+
+### Frontend
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **T-9** | `frontend/src/types/experiment.ts` | TypeScript interfaces mirroring backend models: `SampleMeta`, `Sample`, `Group`, `ExperimentMeta`, `Experiment`, `ExperimentListItem`; request bodies `ExperimentCreateRequest`, `GroupCreateRequest`, `SampleAddRequest`, `SampleUpdateRequest`. |
+| **T-10** | `frontend/src/types/table.ts` | `GateStatCell`, `BatchStatsRow/Table`, `PlateWellRow/Table`, `PopStatsRow/Table`, `SortDir`. |
+| **T-11** | `frontend/src/context/ExperimentContext.tsx` | `ExperimentProvider` React component + `useExperiment()` hook. Manages: `experimentList` (lazy-loaded on mount), `activeExperiment` (full hierarchy), `activeGroupId`, `activeSampleId`, `loading`, `error`. All CRUD actions (`createExperiment`, `deleteExperiment`, `createGroup`, `deleteGroup`, `addSample`, `updateSample`, `deleteSample`, `moveSample`) call the REST API then refresh the active experiment. `refreshActiveExperiment()` re-fetches and updates the list. Centralised `fetchJSON<T>()` helper. |
+| **T-12** | `frontend/src/components/ExperimentTree/ExperimentTree.tsx` | Sidebar tree component: expandable `ExperimentNode` → `GroupNode` → `SampleNode`. Click to select (calls `selectExperiment/Group/Sample`). Inline create via `InlineInput` for experiments, groups, and samples. Right-click `ContextMenu` (add/delete at each level, move sample submenu). HTML5 drag-drop: drag a sample, drop on a group header to `moveSample`. Status dots (green=loaded, red=error, grey=pending). Gate count badge on samples. |
+| **T-13** | `frontend/src/components/Tables/BatchStatsTable.tsx` | Sortable/filterable samples×gates table. `SortKey` discriminated union for per-gate-column sorting (count / % parent / % total). Filter input matches sample name or group name. Shift+click / Ctrl+click multi-row selection. Copy to clipboard and CSV download (selected rows or all). Stripe rows, sticky dual header row (gate group name + sub-columns), status dot per row. |
+| **T-14** | `frontend/src/components/Tables/PlateWellTable.tsx` | Plate well grid (96/48/24/12/6-well). Heat-map background intensity scaled to max gate count. Click to select wells; double-click for `WellDetail` modal. CSV export of well assignments. Status dot (green=loaded, red=error, grey=empty). Gate count and % shown inside each cell; large counts formatted with `k` suffix. |
+| **T-15** | `frontend/src/components/Tables/PopStatsTable.tsx` | Per-channel statistics table. Columns: Channel, MFI, Median, SD, CV%, Geo Mean. Sortable by any column. CV% > 100 highlighted amber with ⚠ indicator. Gate summary header (name, count, % parent, % total). Copy and CSV export. |
+| **T-16** | `frontend/src/components/Panels/TablePanel.tsx` | Tabbed panel hosting all three tables. **Batch Stats** tab auto-loads on `activeExperiment` change, accepts optional gate filter input. **Plate Wells** tab accepts a plate ID + optional gate name. **Population** tab accepts a gate ID. All tabs show loading/error state. |
+| **T-17** | `frontend/src/main.tsx` | Wrapped `<App>` with `<ExperimentProvider>` so the entire app tree can `useExperiment()`. |
+| **T-18** | `frontend/src/App.tsx` | Added `experimentPanelOpen` + `tablePanelOpen` state. New collapsible **Experiments** sidebar section (renders `<ExperimentTree />`). New **📊 Table Editor** button that opens `<TablePanel />` as a full-screen overlay modal with a close button. |
+
+**Results:**
+- `tsc --noEmit` → 0 errors
+- 42 / 42 Phase T tests pass
+- Full backend suite: **279 / 279** tests pass
+- 2 pre-existing frontend test failures (gateCreation, compensationApply) unrelated to Phase T
 
 ---
 

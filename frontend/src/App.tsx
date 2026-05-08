@@ -2,6 +2,7 @@ import React from "react";
 import { GateTreePanel } from "./components/GateTreePanel";
 import { ExperimentTree } from "./components/ExperimentTree/ExperimentTree";
 import { TablePanel } from "./components/Panels/TablePanel";
+import { LayoutEditorPanel } from "./components/Panels/LayoutEditorPanel";
 import type { GateNode } from "./types/gates";
 import { breadcrumbPath, findNode, flattenTree } from "./types/gates";
 import { getUiChannelLabel } from "./channelAliases";
@@ -260,6 +261,7 @@ export const App: React.FC = () => {
   // T: Experiment hierarchy + Table panel
   const [experimentPanelOpen, setExperimentPanelOpen] = React.useState(false);
   const [tablePanelOpen, setTablePanelOpen] = React.useState(false);
+  const [layoutEditorOpen, setLayoutEditorOpen] = React.useState(false);
 
   // K: sample groups, gating templates, batch statistics
   type SampleInfo = { file_id: string; label: string };
@@ -2202,6 +2204,32 @@ export const App: React.FC = () => {
             >
               <span>📊</span>
               <span>Table Editor</span>
+            </button>
+          </div>
+
+          {/* U: Layout Editor toggle (Phase U) */}
+          <div style={{ marginBottom: "0.8rem" }}>
+            <button
+              type="button"
+              onClick={() => setLayoutEditorOpen(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                width: "100%",
+                textAlign: "left",
+                padding: "0.3rem 0.5rem",
+                borderRadius: "0.55rem",
+                border: "1px solid rgba(148,163,184,0.35)",
+                background: "transparent",
+                color: "#a78bfa",
+                fontSize: "0.78rem",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              <span>🗂</span>
+              <span>Layout Editor</span>
             </button>
           </div>
 
@@ -6750,6 +6778,53 @@ export const App: React.FC = () => {
         </div>
         </div>
       </div>
+
+      {/* U: Layout Editor overlay modal */}
+      {layoutEditorOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10001,
+            display: "flex",
+            flexDirection: "column",
+            background: "rgba(0,0,0,0.7)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "8px 16px",
+              background: "#0e0e1a",
+              borderBottom: "1px solid #333",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#a78bfa" }}>
+              🗂 Layout Editor
+            </span>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => setLayoutEditorOpen(false)}
+              style={{
+                background: "none",
+                border: "1px solid #444",
+                borderRadius: 4,
+                color: "#ccc",
+                cursor: "pointer",
+                fontSize: 13,
+                padding: "3px 12px",
+              }}
+            >
+              Close
+            </button>
+          </div>
+          <div style={{ flex: 1, overflow: "auto", background: "#fff" }}>
+            <LayoutEditorPanel />
+          </div>
+        </div>
+      )}
 
       {/* T: Table Editor overlay modal */}
       {tablePanelOpen && (

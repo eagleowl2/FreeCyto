@@ -1573,16 +1573,24 @@ export const App: React.FC = () => {
       {/* Top toolbar — FreeCyto-style editor buttons */}
       <div
         style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
           display: "flex",
           gap: "0.75rem",
-          marginBottom: "1.5rem",
           padding: "0.75rem 1rem",
-          borderRadius: "0.75rem",
-          background: "rgba(15,23,42,0.8)",
-          border: "1px solid rgba(148,163,184,0.3)",
+          borderRadius: 0,
+          background: "rgba(15,23,42,0.95)",
+          border: "none",
+          borderBottom: "1px solid rgba(148,163,184,0.3)",
           width: "100%",
-          maxWidth: "min(1320px, 100%)",
+          maxWidth: "none",
           flexWrap: "wrap",
+          marginLeft: "calc(-1 * clamp(1rem, 3vw, 2.5rem))",
+          marginRight: "calc(-1 * clamp(1rem, 3vw, 2.5rem))",
+          paddingLeft: "clamp(1rem, 3vw, 2.5rem)",
+          paddingRight: "clamp(1rem, 3vw, 2.5rem)",
+          marginBottom: "1.5rem",
         }}
       >
         <button
@@ -2261,32 +2269,6 @@ export const App: React.FC = () => {
                 <ExperimentTree />
               </div>
             )}
-          </div>
-
-          {/* Plate Editor button (in sidebar) */}
-          <div style={{ marginBottom: "0.8rem" }}>
-            <button
-              type="button"
-              onClick={() => setPlatePanelOpen(true)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                width: "100%",
-                textAlign: "left",
-                padding: "0.3rem 0.5rem",
-                borderRadius: "0.55rem",
-                border: "1px solid rgba(148,163,184,0.35)",
-                background: "transparent",
-                color: "#60a5fa",
-                fontSize: "0.78rem",
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              <span>📋</span>
-              <span>Plate Editor</span>
-            </button>
           </div>
 
           {/* K: Sample groups panel */}

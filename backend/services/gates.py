@@ -1409,3 +1409,25 @@ def copy_gates_between_files(
     "results": results,
     "total_gates_copied": sum(results.values()),
   }
+
+
+# ─── helpers used by routers/tables.py ────────────────────────────────────────
+
+def get_gate_by_id(gate_id: str) -> GateResponse:
+  """Return a single GateResponse by gate ID (used by tables router)."""
+  _cleanup_expired_suspended_files()
+  record = _store.gates_by_id.get(gate_id)
+  if record is None:
+    raise KeyError(f"Gate {gate_id!r} not found")
+  if not record._cache_valid:
+    _compute_stats(record)
+  return _record_to_response(record)
+
+
+def get_gate_mask(gate_id: str) -> "np.ndarray":
+  """Return the boolean event mask for a gate (used by tables router)."""
+  _cleanup_expired_suspended_files()
+  record = _store.gates_by_id.get(gate_id)
+  if record is None:
+    raise KeyError(f"Gate {gate_id!r} not found")
+  return _get_mask(record)

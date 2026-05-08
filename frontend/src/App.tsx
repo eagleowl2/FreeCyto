@@ -1,5 +1,7 @@
 import React from "react";
 import { GateTreePanel } from "./components/GateTreePanel";
+import { ExperimentTree } from "./components/ExperimentTree/ExperimentTree";
+import { TablePanel } from "./components/Panels/TablePanel";
 import type { GateNode } from "./types/gates";
 import { breadcrumbPath, findNode, flattenTree } from "./types/gates";
 import { getUiChannelLabel } from "./channelAliases";
@@ -254,6 +256,10 @@ export const App: React.FC = () => {
   const [histData, setHistData] = React.useState<HistogramData | null>(null);
   const [drawingInterval, setDrawingInterval] = React.useState<{ startX: number; endX: number } | null>(null);
   const [pendingInterval, setPendingInterval] = React.useState<{ xMin: number; xMax: number; gateName: string } | null>(null);
+
+  // T: Experiment hierarchy + Table panel
+  const [experimentPanelOpen, setExperimentPanelOpen] = React.useState(false);
+  const [tablePanelOpen, setTablePanelOpen] = React.useState(false);
 
   // K: sample groups, gating templates, batch statistics
   type SampleInfo = { file_id: string; label: string };
@@ -2131,6 +2137,73 @@ export const App: React.FC = () => {
               })}
             </div>
           )}
+
+          {/* T: Experiments (Phase T) */}
+          <div style={{ marginBottom: "0.8rem" }}>
+            <button
+              type="button"
+              onClick={() => setExperimentPanelOpen((o) => !o)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                width: "100%",
+                textAlign: "left",
+                padding: "0.3rem 0.5rem",
+                borderRadius: "0.55rem",
+                border: "1px solid rgba(148,163,184,0.35)",
+                background: experimentPanelOpen ? "rgba(77,166,255,0.12)" : "transparent",
+                color: "#90c8ff",
+                fontSize: "0.78rem",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              <span>{experimentPanelOpen ? "▾" : "▸"}</span>
+              <span>Experiments</span>
+            </button>
+            {experimentPanelOpen && (
+              <div
+                style={{
+                  marginTop: "0.4rem",
+                  borderRadius: "0.65rem",
+                  background: "rgba(12,18,36,0.9)",
+                  border: "1px solid rgba(77,166,255,0.2)",
+                  overflow: "hidden",
+                  maxHeight: 360,
+                  overflowY: "auto",
+                }}
+              >
+                <ExperimentTree />
+              </div>
+            )}
+          </div>
+
+          {/* T: Table Panel toggle (Phase T) */}
+          <div style={{ marginBottom: "0.8rem" }}>
+            <button
+              type="button"
+              onClick={() => setTablePanelOpen(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                width: "100%",
+                textAlign: "left",
+                padding: "0.3rem 0.5rem",
+                borderRadius: "0.55rem",
+                border: "1px solid rgba(148,163,184,0.35)",
+                background: "transparent",
+                color: "#fbbf24",
+                fontSize: "0.78rem",
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              <span>📊</span>
+              <span>Table Editor</span>
+            </button>
+          </div>
 
           {/* K: Sample groups panel */}
           {loadedFiles.length > 0 && (
@@ -6677,6 +6750,55 @@ export const App: React.FC = () => {
         </div>
         </div>
       </div>
+
+      {/* T: Table Editor overlay modal */}
+      {tablePanelOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            display: "flex",
+            flexDirection: "column",
+            background: "rgba(0,0,0,0.7)",
+          }}
+        >
+          {/* Modal header */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "8px 16px",
+              background: "#0e0e1a",
+              borderBottom: "1px solid #333",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#fbbf24" }}>
+              📊 Table Editor
+            </span>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => setTablePanelOpen(false)}
+              style={{
+                background: "none",
+                border: "1px solid #444",
+                borderRadius: 4,
+                color: "#ccc",
+                cursor: "pointer",
+                fontSize: 13,
+                padding: "3px 12px",
+              }}
+            >
+              Close
+            </button>
+          </div>
+          {/* Panel content */}
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <TablePanel />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

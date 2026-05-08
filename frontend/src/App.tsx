@@ -1561,7 +1561,7 @@ export const App: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: "flex-start",
         fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         background:
           "radial-gradient(circle at top, #0f172a 0, #020617 45%, #020617 100%)",
@@ -1570,6 +1570,88 @@ export const App: React.FC = () => {
         boxSizing: "border-box",
       }}
     >
+      {/* Top toolbar — FreeCyto-style editor buttons */}
+      <div
+        style={{
+          display: "flex",
+          gap: "0.75rem",
+          marginBottom: "1.5rem",
+          padding: "0.75rem 1rem",
+          borderRadius: "0.75rem",
+          background: "rgba(15,23,42,0.8)",
+          border: "1px solid rgba(148,163,184,0.3)",
+          width: "100%",
+          maxWidth: "min(1320px, 100%)",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setTablePanelOpen(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(148,163,184,0.4)",
+            background: tablePanelOpen ? "rgba(251,191,36,0.2)" : "transparent",
+            color: "#fbbf24",
+            fontSize: "0.9rem",
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          <span>📊</span>
+          <span>Table Editor</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setLayoutEditorOpen(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(148,163,184,0.4)",
+            background: layoutEditorOpen ? "rgba(167,139,250,0.2)" : "transparent",
+            color: "#a78bfa",
+            fontSize: "0.9rem",
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          <span>🗂</span>
+          <span>Layout Editor</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPlatePanelOpen(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(148,163,184,0.4)",
+            background: platePanelOpen ? "rgba(96,165,250,0.2)" : "transparent",
+            color: "#60a5fa",
+            fontSize: "0.9rem",
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          <span>📋</span>
+          <span>Plate Editor</span>
+        </button>
+      </div>
+
           <div
             style={{
               display: "grid",
@@ -1609,7 +1691,7 @@ export const App: React.FC = () => {
               color: "#e5e7eb",
             }}
           >
-            OpenCyto Studio
+            FreeCyto Studio
           </h1>
           <p
             style={{
@@ -2181,11 +2263,11 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          {/* T: Table Panel toggle (Phase T) */}
+          {/* Plate Editor button (in sidebar) */}
           <div style={{ marginBottom: "0.8rem" }}>
             <button
               type="button"
-              onClick={() => setTablePanelOpen(true)}
+              onClick={() => setPlatePanelOpen(true)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -2196,40 +2278,14 @@ export const App: React.FC = () => {
                 borderRadius: "0.55rem",
                 border: "1px solid rgba(148,163,184,0.35)",
                 background: "transparent",
-                color: "#fbbf24",
+                color: "#60a5fa",
                 fontSize: "0.78rem",
                 fontWeight: 500,
                 cursor: "pointer",
               }}
             >
-              <span>📊</span>
-              <span>Table Editor</span>
-            </button>
-          </div>
-
-          {/* U: Layout Editor toggle (Phase U) */}
-          <div style={{ marginBottom: "0.8rem" }}>
-            <button
-              type="button"
-              onClick={() => setLayoutEditorOpen(true)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                width: "100%",
-                textAlign: "left",
-                padding: "0.3rem 0.5rem",
-                borderRadius: "0.55rem",
-                border: "1px solid rgba(148,163,184,0.35)",
-                background: "transparent",
-                color: "#a78bfa",
-                fontSize: "0.78rem",
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              <span>🗂</span>
-              <span>Layout Editor</span>
+              <span>📋</span>
+              <span>Plate Editor</span>
             </button>
           </div>
 

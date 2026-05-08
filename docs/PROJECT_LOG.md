@@ -1,6 +1,38 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑05‑08 (Phase T — Complete — Table Editor + Experiment/Group/Sample hierarchy)
+> Last updated: 2026‑05‑08 (Phase U — Complete — Layout Editor: rich metadata, gating strategy, disk persistence, CRUD UI)
+
+---
+
+## 2026‑05‑08 — Phase U: Layout Editor
+
+**Scope:** Enhanced layout template system with rich metadata (description, author, tags, compatible channels), ordered gating strategy (workflow designer), JSON disk persistence, and a full CRUD layout editor UI in the frontend.
+
+### Backend
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **U-1** | `backend/models/layout_models.py` | New Pydantic v2 models: `GatingStep` (gate\_name, condition\_type, threshold, notes); `LayoutMetadata` (description, author, compatible\_channels, tags); `LayoutUpdateRequest` (partial — optional name + optional metadata); `StrategyUpdateRequest` (list of steps); `LayoutListItem` (compact summary with strategy\_step\_count); `LayoutDetailResponse` (full detail with embedded `LayoutMetadata` and `strategy`). |
+| **U-2** | `backend/services/layouts.py` | Rewrote `LayoutStore`. `Layout` dataclass gains: `description`, `author`, `compatible_channels`, `tags`, `strategy: list[GatingStep]`, `created_date`, `modified_date`. Thread-safe with `threading.Lock`. Disk persistence at `~/.freecyto/layouts.json` (version 2); loaded on startup, saved on every mutation. `_collect_channels(nodes)` auto-populates `compatible_channels` from gate tree. Serialisation helpers `_gate_response_to/from_dict`, `_layout_to/from_dict`. New store methods: `update_metadata(id, req)`, `update_strategy(id, steps)`, `clear()`. Module-level `reset_layout_store()` for tests. |
+| **U-3** | `backend/routers/layouts.py` | Replaced minimal router with full CRUD surface. `POST /api/layouts` (201); `GET /api/layouts` → `list[LayoutListItem]`; `GET /api/layouts/{id}` → `LayoutDetailResponse`; `PUT /api/layouts/{id}` (partial update); `DELETE /api/layouts/{id}` (204); `GET /api/layouts/{id}/strategy` → `list[GatingStep]`; `PUT /api/layouts/{id}/strategy` → replace steps. `POST /api/layouts/{id}/apply` retained from Phase S. |
+| **U-4** | `backend/tests/test_phase_u.py` | **21 new tests**: save (201), list fields, get detail, update name only, update metadata only, update both, delete (204), get/put/replace strategy, strategy\_step\_count in list, apply, apply-to-missing (404), 404 for missing CRUD, empty-name 400s, compatible\_channels auto-population, disk persistence round-trip via two separate `LayoutStore` instances. |
+| **U-5** | `backend/tests/test_phase_s.py` | Fixed two old test assertions expecting HTTP 200 for `POST /api/layouts` and `DELETE /api/layouts/{id}` — updated to accept `in (200, 201)` / `in (200, 204)` after Phase U changed status codes to proper REST values. |
+
+### Frontend
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **U-6** | `frontend/src/types/layout.ts` | TypeScript interfaces: `ConditionType`, `GatingStep`, `LayoutMetadata`, `LayoutListItem`, `LayoutDetail`, `LayoutCreateRequest`, `LayoutUpdateRequest`, `StrategyUpdateRequest`. |
+| **U-7** | `frontend/src/components/Editors/TemplateMetadataEditor.tsx` | Form for editing a layout's name, description, author, and tags (comma-separated). Shows auto-detected compatible channels (read-only) and gate count. Calls `PUT /api/layouts/{id}`. Resets on `layout.id` change. Save / error / success feedback. |
+| **U-8** | `frontend/src/components/Editors/WorkflowDesigner.tsx` | Ordered `GatingStep` list editor. Steps rendered as drag-sortable cards (HTML5 drag API). Each card: gate name input, condition type select (always / if\_parent\_count\_gt / if\_parent\_pct\_gt), optional threshold, notes field, remove button. "Add step" appends a blank step. "Save workflow" calls `PUT /api/layouts/{id}/strategy`. |
+| **U-9** | `frontend/src/components/Editors/LayoutEditor.tsx` | Visual read-only + drag-reorder gate hierarchy viewer. Renders `Layout.gate_tree` as a collapsible tree with colour-coded type dots (rectangle=green, polygon=blue, ellipse=purple, quadrant=amber). Drag rows to reorder siblings (local state only — a note explains saving requires re-using the Gate Panel + re-saving the layout). |
+| **U-10** | `frontend/src/components/Panels/LayoutEditorPanel.tsx` | Tabbed panel with four tabs: **Templates** (list + create/delete/apply layouts), **Gate Tree** (`LayoutEditor`), **Workflow** (`WorkflowDesigner`), **Metadata** (`TemplateMetadataEditor`). Propagates updates from sub-editors back to the list (name, description, tags, strategy\_step\_count). Apply layout section accepts target file ID. |
+| **U-11** | `frontend/src/App.tsx` | Imported `LayoutEditorPanel`. Added `layoutEditorOpen` state. New **🗂 Layout Editor** button in the sidebar (purple accent, below Table Editor). Opens `<LayoutEditorPanel />` as a full-screen overlay modal (z-index 10001). |
+
+**Results:**
+- `tsc --noEmit` → 0 errors
+- 21 / 21 Phase U tests pass
+- Full backend suite: **318 / 318** tests pass
 
 ---
 

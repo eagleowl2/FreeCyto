@@ -10,6 +10,7 @@ import { PseudocolorCanvas, type DensityColormap, type DensityScale } from "./Ps
 import { ScatterCanvas } from "./ScatterCanvas";
 import { AxisTicks } from "./AxisTicks";
 import { plotScaledMargins } from "./plotMargins";
+import { useUiStore } from "./stores/uiStore";
 
 type HealthState =
   | { status: "idle" }
@@ -111,6 +112,25 @@ async function patchJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 export const App: React.FC = () => {
+  // Phase X (slice 1): UI visibility flags now live in a shared Zustand store
+  // (src/stores/uiStore.ts). Setters keep the React useState signature so all
+  // existing call sites below are unchanged.
+  const {
+    experimentPanelOpen, setExperimentPanelOpen,
+    groupPanelOpen, setGroupPanelOpen,
+    dpPanelOpen, setDpPanelOpen,
+    platePanelOpen, setPlatePanelOpen,
+    tablePanelOpen, setTablePanelOpen,
+    layoutEditorOpen, setLayoutEditorOpen,
+    compensationModalOpen, setCompensationModalOpen,
+    compensationFullMatrixOpen, setCompensationFullMatrixOpen,
+    applyGatesModalOpen, setApplyGatesModalOpen,
+    saveLayoutModalOpen, setSaveLayoutModalOpen,
+    plateCreateOpen, setPlateCreateOpen,
+    statsExpanded, setStatsExpanded,
+    popExpanded, setPopExpanded,
+  } = useUiStore();
+
   const [health, setHealth] = React.useState<HealthState>({ status: "idle" });
 
   const [fcsPath, setFcsPath] = React.useState("");
@@ -171,7 +191,7 @@ export const App: React.FC = () => {
   };
   const [gateStats, setGateStats] = React.useState<GateStatsData | null>(null);
   const [gateStatsLoading, setGateStatsLoading] = React.useState(false);
-  const [statsExpanded, setStatsExpanded] = React.useState(false);
+  // statsExpanded → uiStore (Phase X)
   // P-3: column sort for stats table
   type StatsSortCol = "channel" | "mean" | "median" | "sd" | "cv";
   const [statsSortCol, setStatsSortCol] = React.useState<StatsSortCol>("channel");
@@ -181,7 +201,7 @@ export const App: React.FC = () => {
   // Q-1: Batch gate copy
   type FileInfo = { id: string; sample_name: string; event_count: number };
   const [allFiles, setAllFiles] = React.useState<FileInfo[]>([]);
-  const [applyGatesModalOpen, setApplyGatesModalOpen] = React.useState(false);
+  // applyGatesModalOpen → uiStore (Phase X)
   const [applyGatesTargets, setApplyGatesTargets] = React.useState<Set<string>>(new Set());
   const [applyGatesLoading, setApplyGatesLoading] = React.useState(false);
   const [applyGatesMessage, setApplyGatesMessage] = React.useState<string>("");
@@ -190,12 +210,12 @@ export const App: React.FC = () => {
   type PopulationSortCol = "name" | "count" | "pct_parent" | "pct_total";
   const [popSortCol, setPopSortCol] = React.useState<PopulationSortCol>("name");
   const [popSortDir, setPopSortDir] = React.useState<"asc" | "desc">("asc");
-  const [popExpanded, setPopExpanded] = React.useState(false);
+  // popExpanded → uiStore (Phase X)
 
   // Q-3: Gate layout save/restore
   type LayoutInfo = { id: string; name: string; gate_count: number; source_file_id: string };
   const [savedLayouts, setSavedLayouts] = React.useState<LayoutInfo[]>([]);
-  const [saveLayoutModalOpen, setSaveLayoutModalOpen] = React.useState(false);
+  // saveLayoutModalOpen → uiStore (Phase X)
   const [saveLayoutName, setSaveLayoutName] = React.useState("");
   const [saveLayoutLoading, setSaveLayoutLoading] = React.useState(false);
   const [loadLayoutLoading, setLoadLayoutLoading] = React.useState(false);
@@ -204,8 +224,7 @@ export const App: React.FC = () => {
   type SpilloverData = { file_id: string; channel_names: string[]; matrix: number[][]; cond: number };
   const [spilloverData, setSpilloverData] = React.useState<SpilloverData | null>(null);
   const [spilloverLoading, setSpilloverLoading] = React.useState(false);
-  const [compensationModalOpen, setCompensationModalOpen] = React.useState(false);
-  const [compensationFullMatrixOpen, setCompensationFullMatrixOpen] = React.useState(false);
+  // compensationModalOpen, compensationFullMatrixOpen → uiStore (Phase X)
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(
     () =>
@@ -258,17 +277,14 @@ export const App: React.FC = () => {
   const [drawingInterval, setDrawingInterval] = React.useState<{ startX: number; endX: number } | null>(null);
   const [pendingInterval, setPendingInterval] = React.useState<{ xMin: number; xMax: number; gateName: string } | null>(null);
 
-  // T: Experiment hierarchy + Table panel
-  const [experimentPanelOpen, setExperimentPanelOpen] = React.useState(false);
-  const [tablePanelOpen, setTablePanelOpen] = React.useState(false);
-  const [layoutEditorOpen, setLayoutEditorOpen] = React.useState(false);
+  // T: Experiment hierarchy + Table panel — visibility flags moved to uiStore (Phase X).
 
   // K: sample groups, gating templates, batch statistics
   type SampleInfo = { file_id: string; label: string };
   type GroupInfo = { id: string; name: string; samples: SampleInfo[]; template_id: string | null };
   type BatchStatRow = { file_id: string; label: string; gate_name: string; count: number; pct_of_parent: number; pct_of_total: number; parent_count: number };
   const [groups, setGroups] = React.useState<GroupInfo[]>([]);
-  const [groupPanelOpen, setGroupPanelOpen] = React.useState(false);
+  // groupPanelOpen → uiStore (Phase X)
   const [newGroupName, setNewGroupName] = React.useState("");
   const [newGroupFileIds, setNewGroupFileIds] = React.useState<string[]>([]);
   const [groupError, setGroupError] = React.useState<string | null>(null);
@@ -291,7 +307,7 @@ export const App: React.FC = () => {
   // L: Derived parameters
   type DerivedParamInfo = { id: string; file_id: string; name: string; expression: string };
   const [derivedParams, setDerivedParams] = React.useState<DerivedParamInfo[]>([]);
-  const [dpPanelOpen, setDpPanelOpen] = React.useState(false);
+  // dpPanelOpen → uiStore (Phase X)
   const [dpName, setDpName] = React.useState("");
   const [dpExpr, setDpExpr] = React.useState("");
   const [dpError, setDpError] = React.useState<string | null>(null);
@@ -310,14 +326,14 @@ export const App: React.FC = () => {
   type PlateStatWell = { well_id: string; file_id: string | null; label: string | null; row: number; col: number; count: number; pct_of_parent: number; pct_of_total: number; total_events: number };
   type PlateStatsData = { plate_id: string; plate_name: string; gate_name: string; rows: number; cols: number; wells: PlateStatWell[] };
   const [plates, setPlates] = React.useState<PlateInfo[]>([]);
-  const [platePanelOpen, setPlatePanelOpen] = React.useState(false);
+  // platePanelOpen → uiStore (Phase X)
   const [activePlateId, setActivePlateId] = React.useState<string | null>(null);
   const [plateGateName, setPlateGateName] = React.useState("");
   const [plateStats, setPlateStats] = React.useState<PlateStatsData | null>(null);
   const [plateStatsLoading, setPlateStatsLoading] = React.useState(false);
   const [plateCreateName, setPlateCreateName] = React.useState("");
   const [plateCreateFormat, setPlateCreateFormat] = React.useState("96");
-  const [plateCreateOpen, setPlateCreateOpen] = React.useState(false);
+  // plateCreateOpen → uiStore (Phase X)
   const [plateAssignMode, setPlateAssignMode] = React.useState(false);
   const [plateAssignWellId, setPlateAssignWellId] = React.useState<string | null>(null);
 

@@ -1,6 +1,45 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑06‑17 (Phase W — Complete — Robust & persistent gating templates: all gate types + disk persistence)
+> Last updated: 2026‑06‑17 (Phase X — In progress — App.tsx → Zustand: slice 1 (UI visibility) migrated)
+
+---
+
+## 2026‑06‑17 — Phase X: App.tsx → Zustand (incremental) — Slice 1: UI visibility
+
+**Scope:** Begin decomposing the `App.tsx` monolith (~6,940 lines, ~95 `useState` hooks)
+into focused [Zustand](https://github.com/pmndrs/zustand) stores under `frontend/src/stores/`.
+A big-bang rewrite of a file this large and lightly tested would be high-risk, so Phase X is
+**incremental**: one cohesive slice at a time, each verified end-to-end (`tsc` + `vitest` +
+live preview) before the next. Slices are ordered least-coupled first.
+
+**Slice 1 — `uiStore` (this commit):** the 13 panel/modal "open" + section "expanded"
+booleans, which are pure presentational toggles with zero cross-domain coupling.
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **X-1** | `frontend/package.json` | Add `zustand@^5` (v5.0.14). |
+| **X-2** | `frontend/src/stores/uiStore.ts` (new) | `useUiStore` holding 13 flags: `experimentPanelOpen`, `groupPanelOpen`, `dpPanelOpen`, `platePanelOpen`, `tablePanelOpen`, `layoutEditorOpen`, `compensationModalOpen`, `compensationFullMatrixOpen`, `applyGatesModalOpen`, `saveLayoutModalOpen`, `plateCreateOpen`, `statsExpanded`, `popExpanded`. **Each setter mirrors React's `useState` updater signature** (`(v \| (prev=>v)) => void`) so the migration is a pure declaration-site swap — every existing call site (`setX(true)`, `setX(o=>!o)`, `setX(next)`) is untouched. `resetUiStore()` provided for test isolation. |
+| **X-3** | `frontend/src/stores/README.md` (new) | Documents the incremental approach, conventions, and the planned slice ordering (plot/view → gates → compensation → groups → plates → files). |
+| **X-4** | `frontend/src/App.tsx` | Removed the 13 `useState` declarations; added one `useUiStore()` destructure at the top of `App`. All ~45 getter/setter call sites unchanged. Net: monolith shrinks, these flags become shareable without prop-drilling. |
+| **X-5** | `frontend/src/test/stores/uiStore.test.ts` (new) | **5 tests**: all flags init `false`; direct-value setter; functional-updater setter; targeted update leaves siblings untouched; `resetUiStore()`. |
+
+**Results:**
+- `tsc --noEmit`: **0 errors** (signature-preserving setters typecheck across every call site).
+- `vitest`: **19 passed / 2 failed** — the 5 new uiStore tests pass; the 2 failures are
+  **pre-existing and unrelated** (`gateCreation.test.tsx` expects `transform_x="linear"` but
+  the default transform is now `"log"`; `compensationApply.test.tsx` matches an old textarea
+  placeholder). Baseline before Phase X was 14 passed / **the same 2** failed — **zero new failures**.
+- **Live preview verification:** app loads with no console errors; clicking **Experiments**
+  toggles ▸→▾ (inline expand, `experimentPanelOpen`); clicking **Table Editor** mounts the
+  overlay + Close button (modal-style, `tablePanelOpen`) — confirming store action → re-render
+  end-to-end in the running app.
+
+**Notes / follow-up:**
+- Two long-standing frontend test failures should be fixed as separate hygiene (update the
+  `gateCreation` transform expectation and the `compensationApply` placeholder matcher).
+- Remaining Phase X slices (plot/view settings, gates, compensation, groups, plates, files) are
+  enumerated in `frontend/src/stores/README.md`. The Phase T Experiment/Group/Sample hierarchy
+  already lives in its own `ExperimentContext` and is left as-is.
 
 ---
 

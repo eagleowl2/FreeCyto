@@ -1,6 +1,77 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑05‑08 (Phase U — Complete — Layout Editor: rich metadata, gating strategy, disk persistence, CRUD UI)
+> Last updated: 2026‑06‑17 (Phase W — Complete — Robust & persistent gating templates: all gate types + disk persistence)
+
+---
+
+## 2026‑06‑17 — Phase W: Robust & Persistent Gating Templates
+
+**Scope:** Closed two gaps in the multi-sample group/template workflow (the architecture
+review's #1 FlowJo-parity area). Templates were silently lossy (only rectangle/polygon/
+interval propagated; ellipse, boolean, and quad gates were dropped) and groups/templates
+were in-memory only (lost on restart, unlike layouts and experiments). No frontend changes
+— the existing group/template/apply/batch-stats UI ([App.tsx](frontend/src/App.tsx)) now
+benefits transparently.
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **W-1** | `backend/models/group_models.py` | `TemplateGate` extended with `expression` (boolean), `center_x/y`/`radius_x/y`/`angle` (ellipse), and `x_threshold`/`y_threshold` (quad). |
+| **W-2** | `backend/services/groups.py` | `create_template` now captures the new fields from each `GateRecord`. New `_template_gate_to_params(tg)` helper builds the correct discriminated params for **all** gate types (rectangle, interval, polygon, boolean, ellipse, quad); `apply_template` delegates to it instead of an inline rect/interval/polygon-only branch. Quad nodes are recreated as bare nodes — their four child rectangles are separate template gates re-parented by name (same approach as workspace load). |
+| **W-3** | `backend/services/groups.py` | **Disk persistence** mirroring `services/layouts.py`: `~/.freecyto/groups.json` (override via `OPENCYTO_DATA_DIR`). `_save_to_disk()` on every mutation (`create_group`, `delete_group`, `create_template`); `_load_from_disk()` at import; `reset_group_store()` clears memory only (never wipes the file, so test teardown is safe). |
+| **W-4** | `backend/tests/conftest.py` | Session-wide `OPENCYTO_DATA_DIR` → throwaway temp dir (set before service imports), so running the suite never overwrites a real user's `layouts/experiments/groups.json`. Per-test `monkeypatch.setenv` still overrides it. |
+| **W-5** | `backend/tests/test_phase_w.py` | **8 tests**: ellipse/boolean/interval/quad/polygon captured + applied (quad reproduces node + 4 children that partition the parent); persistence round-trip (groups + templates survive a simulated restart and the template still applies); reset does not wipe disk; delete persists. |
+
+**Results:**
+- Full backend suite: **348 / 348** pass.
+- Frontend unchanged (`tsc` unaffected — Phase W is backend-only).
+
+**Notes:**
+- `groups.json` is `version: 1`. Quad child rectangles store `±inf` bounds, which Python's `json` round-trips as `Infinity` (re-read as `float('inf')`); no change needed.
+- The legacy in-memory-only behaviour is gone; existing `test_groups.py` (Phase K) still passes against the persisted store.
+
+---
+
+## 2026‑06‑17 — Phase V: First-Class Quad Gates + Technical Debt
+
+**Scope:** Upgraded quad gates from R-1's four disconnected sibling rectangles to a single
+first-class `type="quad"` node holding a movable crosshair plus four derived child rectangle
+gates (Q1..Q4) that update together — matching FlowJo's single-entity quad behaviour. Also
+cleared two long-standing known issues (D-KI-1, D-KI-2).
+
+### Backend
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **V-1** | `backend/models/gate_models.py` | New `QuadGateCreate` (type, `x_threshold`, `y_threshold`) added to the `GateParamsCreate` discriminated union. Added `x_threshold`/`y_threshold` to `GateResponse` and `GateUpdateRequest`. |
+| **V-2** | `backend/models/workspace_models.py` | Added `x_threshold`/`y_threshold` to `WorkspaceGateDef`. |
+| **V-3** | `backend/services/gates.py` | `GateRecord` gains `x_threshold`/`y_threshold`. `_get_mask`: quad node is a **passthrough** (mask = parent population; channel transforms skipped). New `create_quad_gate(body)` orchestrator: creates the quad node then four child rectangles (`{name}_Q1..Q4`); rolls back the whole quad on any child failure. Helpers `_quad_child_specs` (crosshair → Q1..Q4 bounds using ±inf), `_sync_quad_children` (re-derive child bounds when the crosshair moves), `_build_subtree_response`. `update_gate`: moving the crosshair re-derives all four children. `apply_gate_tree_to_file`, `copy_gates_between_files`, and `_record_to_response` handle the quad type. |
+| **V-4** | `backend/services/workspace_service.py` | Save/load round-trip for quad thresholds; quad node restored as a bare node (its four children are restored separately from the saved tree). |
+| **V-5** | `backend/routers/gates.py` | `POST /api/gates` dispatches `params.type == "quad"` to `create_quad_gate` (returns the node with its four children). Legacy `POST /api/gates/quadrant` (R-1) retained for backward compatibility. |
+| **V-6** | `backend/tests/test_phase_v.py` | **18 tests**: node+4 children, naming, passthrough count, children partition parent, quadrant placement, Q1 bounds, crosshair-move redistribution + persistence + child-bound tracking, hierarchy (quad under rectangle), delete cascade, name-collision rollback, workspace round-trip, copy-between-files, router POST + PATCH. |
+
+### Frontend
+
+| ID | File(s) | Change |
+|----|---------|--------|
+| **V-7** | `frontend/src/App.tsx` | Quad tool now creates a first-class quad via `POST /api/gates` (`params:{type:"quad",...}`) instead of the legacy `/quadrant` endpoint; single create-undo entry (delete cascades). New SVG branch renders the quad node as a **crosshair** (two dashed lines + label) and marks quad-child rectangles non-draggable so dragging one cannot break the crosshair invariant. |
+| **V-8** | `frontend/src/types/gates.ts` | `GateNode` gains `x_threshold`/`y_threshold`. |
+| **V-9** | `frontend/src/components/GateTreePanel.tsx` | `⊞` icon for both legacy `quadrant` and new `quad` types. |
+
+### Technical debt
+
+| ID | File | Fix |
+|----|------|-----|
+| **D-KI-2** | `backend/services/gates.py:_compute_stats` | When a child's parent has a cold count cache, recursively `_compute_stats(parent)` first so `pct_of_parent` is computed against the parent population instead of silently falling back to the whole file. Parent chain is acyclic and depth-bounded (≤50). |
+| **D-KI-1** | `backend/services/gates.py:_point_in_polygon` | Guard the crossing computation with `if denom != 0:` (denom is scalar). Horizontal edges contribute nothing to winding anyway, so this is behaviour-preserving and eliminates the `RuntimeWarning: divide by zero`. |
+| **tests** | `backend/tests/test_tech_debt.py` | **4 tests**: polygon membership with horizontal edges raises no `RuntimeWarning` (square + triangle); `_compute_stats` warms a cold parent and matches the normal list ordering. |
+
+**Results:**
+- `tsc --noEmit` → 0 errors
+- Full backend suite: **340 / 340** pass, including a run with `-W error::RuntimeWarning` (confirms the polygon divide-by-zero warning is gone; remaining warnings are pre-existing `datetime.utcnow` deprecations).
+
+**Known limitations (Phase V):**
+- The quad crosshair is rendered but not yet SVG-draggable; the crosshair moves via `PATCH /api/gates/{id}` (`x_threshold`/`y_threshold`) but a drag-to-move-crosshair interaction in the plot is a follow-up (the shared rectangle/polygon drag system would need a new mode). Quad children are intentionally non-draggable.
+- Legacy `POST /api/gates/quadrant` (4 independent rectangles) remains for backward compatibility; the frontend no longer uses it.
 
 ---
 

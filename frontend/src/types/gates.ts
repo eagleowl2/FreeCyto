@@ -27,6 +27,9 @@ export interface GateNode {
   radius_x?: number | null;
   radius_y?: number | null;
   angle?: number;
+  // V: quad gate crosshair (type='quad' only)
+  x_threshold?: number | null;
+  y_threshold?: number | null;
   count: number;
   pct_total: number;
   pct_of_parent: number;

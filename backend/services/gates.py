@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from typing import Any
 import numpy as np
 
-from models.gate_models import BooleanGateCreate, ChannelStats, EllipseGateCreate, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate, PolygonGateCreate, RectangleGateCreate
+from models.gate_models import BooleanGateCreate, ChannelStats, EllipseGateCreate, GateCreateRequest, GateResponse, GateStatsResponse, GateUpdateRequest, IntervalGateCreate, PolygonGateCreate, QuadGateCreate, RectangleGateCreate
 from services import storage, transforms as transform_service
 
 
@@ -223,15 +223,18 @@ def _point_in_polygon(x: np.ndarray, y: np.ndarray, vertices: list[list[float]])
   winding = np.zeros(x.shape[0], dtype=np.int32)
   on_boundary = np.zeros(x.shape[0], dtype=bool)
   for i in range(n):
-    # Upward crossing: vy[i] <= y < vy[i+1]
-    up = (vy[i] <= y) & (y < vy[i + 1])
-    # Downward crossing: vy[i] > y >= vy[i+1]
-    dn = (vy[i] > y) & (y >= vy[i + 1])
+    # denom is a scalar (vertices are scalars). For a horizontal edge (denom == 0)
+    # both the upward and downward crossing tests are all-False, so the crossing
+    # contributes nothing — skip it. This also avoids dividing the y-array by a zero
+    # scalar, which previously emitted a RuntimeWarning: divide by zero (D-KI-1).
     denom = vy[i + 1] - vy[i]
-    mask = denom != 0
-    cross = np.where(mask, vx[i] + (vx[i + 1] - vx[i]) * (y - vy[i]) / denom, np.nan)
-    winding[up & mask & (x < cross)] += 1
-    winding[dn & mask & (x < cross)] -= 1
+    if denom != 0:
+      # Upward crossing: vy[i] <= y < vy[i+1]; downward crossing: vy[i] > y >= vy[i+1].
+      up = (vy[i] <= y) & (y < vy[i + 1])
+      dn = (vy[i] > y) & (y >= vy[i + 1])
+      cross = vx[i] + (vx[i + 1] - vx[i]) * (y - vy[i]) / denom
+      winding[up & (x < cross)] += 1
+      winding[dn & (x < cross)] -= 1
     # Point on segment (any edge): boundary = inside. Tolerance for float.
     dx = vx[i + 1] - vx[i]
     dy = vy[i + 1] - vy[i]
@@ -275,6 +278,9 @@ class GateRecord:
   radius_x: float | None = None
   radius_y: float | None = None
   angle: float = 0.0
+  # V: quad gate crosshair (type='quad' only; transformed space)
+  x_threshold: float | None = None
+  y_threshold: float | None = None
   _cached_count: int | None = field(default=None, repr=False)
   _cached_pct_total: float | None = field(default=None, repr=False)
   _cached_pct_of_parent: float | None = field(default=None, repr=False)
@@ -461,14 +467,19 @@ def _get_mask(record: GateRecord, _visited: frozenset[str] | None = None) -> np.
     if parent and parent.file_id == record.file_id:
       parent_mask = _get_mask(parent, visited)
 
-  # Boolean gates don't use channel data directly — skip channel lookup for them.
+  # Boolean and quad gates don't use channel data directly — skip channel lookup for them.
+  # (A quad node is a passthrough container; its 4 child rectangles do the partitioning.)
   kwargs = _transform_kwargs(record)
-  if record.type != "boolean":
+  if record.type not in ("boolean", "quad"):
     x = transform_service.apply_transform(
       _get_channel_values(record.file_id, record.x_channel, events), record.transform_x, **kwargs
     )
 
-  if record.type == "interval":
+  if record.type == "quad":
+    # Passthrough: the quad node's population equals its parent population.
+    # The intersection with parent_mask below yields exactly the parent's events.
+    gate_mask = np.ones(n_total, dtype=bool)
+  elif record.type == "interval":
     # 1-D gate: only x_channel is needed; y_channel is empty string for interval gates.
     if record.x_min is None or record.x_max is None:
       gate_mask = np.zeros(n_total, dtype=bool)
@@ -544,8 +555,14 @@ def _compute_stats(record: GateRecord) -> None:
   parent_count = n_total
   if record.parent_gate_id is not None:
     parent = _store.gates_by_id.get(record.parent_gate_id)
-    if parent and parent.file_id == record.file_id and parent._cached_count is not None:
-      parent_count = parent._cached_count
+    if parent and parent.file_id == record.file_id:
+      # D-KI-2: warm the parent's count cache first when it is cold, so pct_of_parent
+      # is computed against the parent population — not silently against the whole file.
+      # The parent chain is acyclic and depth-bounded (≤50), so this recursion terminates.
+      if parent._cached_count is None:
+        _compute_stats(parent)
+      if parent._cached_count is not None:
+        parent_count = parent._cached_count
   pct_of_total = 100.0 * count / n_total if n_total else 0.0
   pct_of_parent = 100.0 * count / parent_count if parent_count else 100.0
   record._cached_count = count
@@ -666,6 +683,12 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
       radius_x=p.radius_x, radius_y=p.radius_y,
       angle=p.angle,
     )
+  elif p.type == "quad":
+    # The quad node itself stores only the crosshair; its 4 child rectangles are
+    # created by create_quad_gate (live POST) or restored from the saved tree
+    # (workspace load / copy), so create_gate stores just the node here.
+    record = GateRecord(**_common, type="quad",
+      x_threshold=p.x_threshold, y_threshold=p.y_threshold)
   else:
     record = GateRecord(**_common, type="polygon", vertices=p.vertices)
 
@@ -697,6 +720,101 @@ def create_gate(body: GateCreateRequest) -> GateResponse:
         r.order = i
     raise
   return _record_to_response(record)
+
+
+# V: first-class quad gate (single node + 4 derived child rectangles)
+
+
+def _quad_child_specs(x_thr: float, y_thr: float) -> list[tuple[str, float, float, float, float]]:
+  """Return (suffix, x_min, y_min, x_max, y_max) for the four quadrants from a crosshair.
+
+  Bounds use ±inf so the quadrants extend to the full plot. Boundaries are closed
+  (a point exactly on the crosshair could fall in two quadrants); for continuous
+  event data this is a measure-zero case, so the four counts sum to the parent count.
+  """
+  inf = float("inf")
+  return [
+    ("Q1", x_thr, y_thr, inf, inf),     # top-right
+    ("Q2", -inf, y_thr, x_thr, inf),    # top-left
+    ("Q3", -inf, -inf, x_thr, y_thr),   # bottom-left
+    ("Q4", x_thr, -inf, inf, y_thr),    # bottom-right
+  ]
+
+
+def _sync_quad_children(quad: GateRecord) -> None:
+  """Re-derive the four child rectangle bounds from the quad's crosshair, in order.
+
+  Children are kept in creation order (Q1, Q2, Q3, Q4) within ``gate_children``;
+  this mapping is applied positionally. Invalidates each child's subtree so the
+  next stats fetch recomputes counts with the moved crosshair.
+  """
+  if quad.x_threshold is None or quad.y_threshold is None:
+    return
+  specs = _quad_child_specs(quad.x_threshold, quad.y_threshold)
+  child_ids = _store.gate_children.get(quad.id, [])
+  for i, cid in enumerate(child_ids[:4]):
+    child = _store.gates_by_id.get(cid)
+    if child is None or child.type != "rectangle":
+      continue
+    _, xmn, ymn, xmx, ymx = specs[i]
+    child.x_min, child.y_min, child.x_max, child.y_max = xmn, ymn, xmx, ymx
+    invalidate_subtree(cid)
+
+
+def create_quad_gate(body: GateCreateRequest) -> GateResponse:
+  """Create a first-class quad gate: the quad node plus its four child rectangles.
+
+  ``body.params`` must be a :class:`QuadGateCreate`. The quad node is created first
+  (passthrough population), then four child rectangle gates named ``{name}_Q1..Q4``.
+  On any failure the whole quad is rolled back (deleting the node cascades to children).
+  Returns the quad node with its four children populated.
+  """
+  p = body.params
+  if not isinstance(p, QuadGateCreate):
+    raise ValueError("create_quad_gate requires params.type == 'quad'")
+
+  quad = create_gate(body)  # stores the quad node (no children yet)
+  try:
+    for suffix, xmn, ymn, xmx, ymx in _quad_child_specs(p.x_threshold, p.y_threshold):
+      child_req = GateCreateRequest(
+        file_id=body.file_id,
+        name=f"{body.name}_{suffix}",
+        x_channel=body.x_channel,
+        y_channel=body.y_channel,
+        parent_gate_id=quad.id,
+        order=-1,
+        transform_x=body.transform_x,
+        transform_y=body.transform_y,
+        arcsinh_cofactor=body.arcsinh_cofactor,
+        logicle_T=body.logicle_T,
+        logicle_W=body.logicle_W,
+        logicle_M=body.logicle_M,
+        logicle_A=body.logicle_A,
+        params=RectangleGateCreate(type="rectangle", x_min=xmn, y_min=ymn, x_max=xmx, y_max=ymx),
+      )
+      create_gate(child_req)
+  except Exception:
+    delete_gate(quad.id)  # cascade-deletes any children created so far
+    raise
+
+  # Re-fetch the quad subtree so the response carries its 4 children.
+  node = _build_subtree_response(quad.id)
+  return node if node is not None else _record_to_response(_store.gates_by_id[quad.id])
+
+
+def _build_subtree_response(gate_id: str) -> GateResponse | None:
+  """Build a nested GateResponse for a gate and its descendants (stats recomputed)."""
+  record = _store.gates_by_id.get(gate_id)
+  if record is None:
+    return None
+  _compute_stats(record)
+  child_responses: list[GateResponse] = []
+  for cid in _store.gate_children.get(gate_id, []):
+    child_node = _build_subtree_response(cid)
+    if child_node is not None:
+      child_responses.append(child_node)
+  base = _record_to_response(record)
+  return base.model_copy(update={"children": child_responses})
 
 
 def _record_to_response(record: GateRecord) -> GateResponse:
@@ -737,6 +855,8 @@ def _record_to_response(record: GateRecord) -> GateResponse:
     radius_x=record.radius_x,
     radius_y=record.radius_y,
     angle=record.angle,
+    x_threshold=record.x_threshold,
+    y_threshold=record.y_threshold,
     count=count,
     pct_total=round(pct_total, 2),
     pct_of_parent=round(pct_of_parent, 2),
@@ -861,6 +981,13 @@ def update_gate(gate_id: str, body: GateUpdateRequest) -> GateResponse:
       record.radius_y = body.radius_y
     if body.angle is not None:
       record.angle = body.angle
+  elif record.type == "quad":
+    # Moving the crosshair re-derives all four child rectangles together.
+    if body.x_threshold is not None:
+      record.x_threshold = body.x_threshold
+    if body.y_threshold is not None:
+      record.y_threshold = body.y_threshold
+    _sync_quad_children(record)
   else:
     raise ValueError(f"Unsupported gate type for update: {record.type!r}")
   invalidate_subtree(gate_id)
@@ -1197,6 +1324,14 @@ def apply_gate_tree_to_file(gate_tree: list[GateResponse], target_file_id: str) 
         radius_y=src.radius_y or 100.0,
         angle=src.angle or 0.0,
       )
+    elif src.type == "quad":
+      # The quad node is recreated as a bare node; its 4 child rectangles appear
+      # separately in the flattened tree and are recreated parented to it.
+      params = QuadGateCreate(
+        type="quad",
+        x_threshold=src.x_threshold if src.x_threshold is not None else 0.0,
+        y_threshold=src.y_threshold if src.y_threshold is not None else 0.0,
+      )
     else:
       continue  # skip unknown types gracefully
 
@@ -1376,6 +1511,12 @@ def copy_gates_between_files(
           radius_x=src_gate.radius_x or 100.0,
           radius_y=src_gate.radius_y or 100.0,
           angle=src_gate.angle or 0.0,
+        )
+      elif src_gate.type == "quad":
+        params = QuadGateCreate(
+          type="quad",
+          x_threshold=src_gate.x_threshold if src_gate.x_threshold is not None else 0.0,
+          y_threshold=src_gate.y_threshold if src_gate.y_threshold is not None else 0.0,
         )
       else:
         raise ValueError(f"Unknown gate type: {src_gate.type}")

@@ -46,6 +46,9 @@ class WorkspaceGateDef(BaseModel):
   radius_x: float | None = None
   radius_y: float | None = None
   angle: float = 0.0
+  # V: quad gate crosshair
+  x_threshold: float | None = None
+  y_threshold: float | None = None
 
 
 class WorkspaceSave(BaseModel):

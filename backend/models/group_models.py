@@ -26,7 +26,7 @@ class TemplateGate(BaseModel):
   """Gate definition portable across files — no file_id binding."""
 
   name: str
-  type: str = Field(..., description="'rectangle' | 'polygon' | 'interval'")
+  type: str = Field(..., description="'rectangle' | 'polygon' | 'interval' | 'boolean' | 'ellipse' | 'quad'")
   parent_name: Optional[str] = Field(None, description="Parent gate name; None = root level")
   x_channel: str
   y_channel: str = ""
@@ -42,6 +42,17 @@ class TemplateGate(BaseModel):
   x_max: Optional[float] = None
   y_max: Optional[float] = None
   vertices: Optional[List[List[float]]] = None
+  # L: boolean gate expression (operands are gate names)
+  expression: Optional[str] = None
+  # N: ellipse gate geometry (transformed space)
+  center_x: Optional[float] = None
+  center_y: Optional[float] = None
+  radius_x: Optional[float] = None
+  radius_y: Optional[float] = None
+  angle: float = 0.0
+  # V: quad gate crosshair (transformed space)
+  x_threshold: Optional[float] = None
+  y_threshold: Optional[float] = None
 
 
 class GatingTemplate(BaseModel):

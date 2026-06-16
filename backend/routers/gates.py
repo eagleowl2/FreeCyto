@@ -30,9 +30,16 @@ def _snapshot_session_async() -> None:
 
 @router.post("", response_model=GateResponse)
 async def create_gate(body: GateCreateRequest) -> GateResponse:
-  """Create a gate (rectangle or polygon). Coordinates in transformed space (same as plot)."""
+  """Create a gate. Coordinates in transformed space (same as plot).
+
+  A ``quad`` gate is created as a single node plus four child rectangle gates
+  (Q1..Q4); the response carries the node with its four children populated.
+  """
   try:
-    resp = gates_service.create_gate(body)
+    if body.params.type == "quad":
+      resp = gates_service.create_quad_gate(body)
+    else:
+      resp = gates_service.create_gate(body)
   except GateNameExistsError as exc:
     raise HTTPException(status_code=409, detail=str(exc)) from exc
   except ValueError as exc:

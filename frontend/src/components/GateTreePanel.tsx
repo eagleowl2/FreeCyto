@@ -80,7 +80,7 @@ const GateTreeNode: React.FC<{
       ? "⬡"
       : node.type === "ellipse"
         ? "⬭"
-        : node.type === "quadrant"
+        : node.type === "quadrant" || node.type === "quad"
           ? "⊞"
           : node.type === "boolean"
             ? "∧"

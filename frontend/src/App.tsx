@@ -4059,44 +4059,39 @@ export const App: React.FC = () => {
                     }));
                   } else if (gateTool === "quadrant") {
                     if (!file || !transformedRange) return;
-                    // P-2: cursor position uses viewRange (zoomed view); extents use transformedRange (full data).
+                    // P-2: cursor position uses viewRange (zoomed view) to place the crosshair.
                     const vr = viewRange ?? transformedRange;
-                    const tr = transformedRange;
                     const xRaw = vr.xMin + (vr.xMax - vr.xMin) * x;
                     const yRaw = vr.yMin + (vr.yMax - vr.yMin) * y;
                     void (async () => {
                       try {
-                        // Find an unused name prefix (Quad, Quad_2, Quad_3, ...)
+                        // Find an unused quad node name (Quad, Quad_2, Quad_3, ...).
                         const namesInUse = new Set(gateList.map((g) => g.name));
-                        let prefix = "Quad";
+                        let name = "Quad";
                         for (let a = 1; a < 100; a++) {
-                          const candidates = [`${prefix}_Q1`, `${prefix}_Q2`, `${prefix}_Q3`, `${prefix}_Q4`];
+                          const candidates = [name, `${name}_Q1`, `${name}_Q2`, `${name}_Q3`, `${name}_Q4`];
                           if (!candidates.some((n) => namesInUse.has(n))) break;
-                          prefix = `Quad_${a + 1}`;
+                          name = `Quad_${a + 1}`;
                         }
 
-                        // R-1: Use atomic quadrant endpoint (auto rollback on failure)
-                        const result = await postJson<{ q1: { id: string }; q2: { id: string }; q3: { id: string }; q4: { id: string } }>(
-                          `${API_BASE}/api/gates/quadrant`,
+                        // V: first-class quad gate — one node + 4 derived child rectangles.
+                        // Moving the crosshair (PATCH) later re-derives all four together.
+                        const result = await postJson<{ id: string }>(
+                          `${API_BASE}/api/gates`,
                           {
                             file_id: file.id,
+                            name,
                             x_channel: xChannel,
                             y_channel: yChannel,
-                            x_split: xRaw,
-                            y_split: yRaw,
-                            name_prefix: prefix,
                             parent_gate_id: activeGateId,
                             transform_x: transformX,
                             transform_y: transformY,
                             arcsinh_cofactor: 150,
-                            x_min: tr.xMin,
-                            x_max: tr.xMax,
-                            y_min: tr.yMin,
-                            y_max: tr.yMax,
+                            params: { type: "quad", x_threshold: xRaw, y_threshold: yRaw },
                           }
                         );
-                        const createdIds = [result.q1.id, result.q2.id, result.q3.id, result.q4.id];
-                        undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create_batch", gateIds: createdIds }];
+                        // Deleting the quad node cascades to its 4 children, so one create-undo suffices.
+                        undoStackRef.current = [...undoStackRef.current.slice(-49), { type: "create", gateId: result.id }];
                         redoStackRef.current = [];
                         await fetchGateTree(file.id);
                       } catch (e) {
@@ -4466,6 +4461,9 @@ export const App: React.FC = () => {
                   }
                 }
 
+                // V: IDs of quad nodes (their child rectangles are quad-managed and
+                // must not be dragged independently — that would break the crosshair invariant).
+                const quadNodeIds = new Set(gateList.filter((g) => g.type === "quad").map((g) => g.id));
                 const gateSvgElements = visibleGates.map((g, idx) => {
                   const color = GATE_COLORS[idx % GATE_COLORS.length]!;
                   const fillAlpha = color + "18";
@@ -4473,6 +4471,29 @@ export const App: React.FC = () => {
                   const pvRaw = previewGate?.id === g.id ? previewGate : null;
                   const pvRect = pvRaw?.kind === "rect" ? pvRaw : null;
                   const pvPoly = pvRaw?.kind === "poly" ? pvRaw : null;
+                  const isQuadChild = g.parent_gate_id != null && quadNodeIds.has(g.parent_gate_id);
+
+                  // V: quad node renders as a crosshair (the 4 child rectangles partition the plot).
+                  if (g.type === "quad" && g.x_threshold != null && g.y_threshold != null) {
+                    const cxS = toSvgX(g.x_threshold);
+                    const cyS = toSvgY(g.y_threshold);
+                    const labelX = Math.max(ml + 2, Math.min(ml + plotAreaW - 4, cxS + 3));
+                    const labelY = Math.max(mt + 10, cyS - 4);
+                    return (
+                      <g key={g.id} style={{ pointerEvents: "none" }}>
+                        <line x1={cxS} y1={mt} x2={cxS} y2={mt + plotAreaH}
+                          stroke={color} strokeWidth={1.4} strokeDasharray="5 2" />
+                        <line x1={ml} y1={cyS} x2={ml + plotAreaW} y2={cyS}
+                          stroke={color} strokeWidth={1.4} strokeDasharray="5 2" />
+                        <rect x={labelX - 2} y={labelY - 9} width={g.name.length * 5.6 + 6} height={12}
+                          rx={3} fill="rgba(15,23,42,0.72)" />
+                        <text x={labelX} y={labelY} fill={color} fontSize={9.5} fontWeight={600}
+                          dominantBaseline="auto" style={{ userSelect: "none" }}>
+                          {g.name}
+                        </text>
+                      </g>
+                    );
+                  }
                   // R-2: FlowJo-style dual percentage label (% parent / % total) when both differ
                   const pctParent = g.pct_of_parent ?? 0;
                   const pctTotal = g.pct_of_total ?? g.pct_total ?? 0;
@@ -4501,12 +4522,14 @@ export const App: React.FC = () => {
                       { sx: left,      sy: top + rH, mode: "resize-sw", cursor: "sw-resize" },
                       { sx: left + rW, sy: top + rH, mode: "resize-se", cursor: "se-resize" },
                     ];
+                    // Quad children are managed by their parent crosshair — not independently draggable.
+                    const dragEnabled = canDrag && !isQuadChild;
                     return (
                       <g key={g.id}>
                         <rect x={left} y={top} width={rW} height={rH}
                           fill={fillAlpha} stroke={color} strokeWidth={1.4} strokeDasharray="5 2"
-                          style={{ cursor: canDrag ? (pvRect ? "grabbing" : "grab") : "default", pointerEvents: canDrag ? "all" : "none" }}
-                          onMouseDown={canDrag ? (e) => startRectDrag(e, g.id, "move", origBounds) : undefined}
+                          style={{ cursor: dragEnabled ? (pvRect ? "grabbing" : "grab") : "default", pointerEvents: dragEnabled ? "all" : "none" }}
+                          onMouseDown={dragEnabled ? (e) => startRectDrag(e, g.id, "move", origBounds) : undefined}
                         />
                         <rect x={labelX - 2} y={labelY - 9} width={label.length * 5.6 + 6} height={12}
                           rx={3} fill="rgba(15,23,42,0.72)" style={{ pointerEvents: "none" }} />
@@ -4514,7 +4537,7 @@ export const App: React.FC = () => {
                           dominantBaseline="auto" style={{ userSelect: "none", pointerEvents: "none" }}>
                           {label}
                         </text>
-                        {canDrag && handles.map((h) => (
+                        {dragEnabled && handles.map((h) => (
                           <rect key={h.mode}
                             x={h.sx - 4} y={h.sy - 4} width={8} height={8}
                             rx={2} fill={color} stroke="white" strokeWidth={1}

@@ -72,8 +72,28 @@ class EllipseGateCreate(BaseModel):
   angle: float = Field(0.0, description="CCW rotation angle in degrees")
 
 
+class QuadGateCreate(BaseModel):
+  """First-class quadrant gate: a single node holding a movable crosshair.
+
+  A quad node is not a population itself — it passes its parent population through
+  unchanged — but it owns four child rectangle gates (Q1..Q4) derived from the
+  crosshair. Moving the crosshair (PATCH x_threshold / y_threshold) re-derives all
+  four children together, matching FlowJo's single-entity quad behaviour.
+
+  Quadrant layout (transformed space)::
+
+      Q2 | Q1        Q1 top-right    (x > x_thr, y > y_thr)
+      ---+---        Q2 top-left     (x < x_thr, y > y_thr)
+      Q3 | Q4        Q3 bottom-left  (x < x_thr, y < y_thr)
+                     Q4 bottom-right (x > x_thr, y < y_thr)
+  """
+  type: Literal["quad"]
+  x_threshold: float = Field(..., description="Crosshair X position (transformed space)")
+  y_threshold: float = Field(..., description="Crosshair Y position (transformed space)")
+
+
 GateParamsCreate = Annotated[
-  RectangleGateCreate | PolygonGateCreate | IntervalGateCreate | BooleanGateCreate | EllipseGateCreate,
+  RectangleGateCreate | PolygonGateCreate | IntervalGateCreate | BooleanGateCreate | EllipseGateCreate | QuadGateCreate,
   Field(discriminator="type"),
 ]
 
@@ -126,6 +146,9 @@ class GateResponse(BaseModel):
   radius_x: float | None = None
   radius_y: float | None = None
   angle: float = 0.0
+  # V: quad gate crosshair (type='quad' only)
+  x_threshold: float | None = None
+  y_threshold: float | None = None
   count: int = 0
   pct_total: float = 0.0
   pct_of_parent: float = 0.0
@@ -155,6 +178,9 @@ class GateUpdateRequest(BaseModel):
   radius_x: float | None = None
   radius_y: float | None = None
   angle: float | None = None
+  # V: quad gate crosshair update (moving the crosshair re-derives all 4 children)
+  x_threshold: float | None = None
+  y_threshold: float | None = None
 
 
 class ChannelStats(BaseModel):

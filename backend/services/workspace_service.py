@@ -65,6 +65,8 @@ def build_workspace_save(file_ids: List[str] | None = None) -> WorkspaceSave:
           radius_x=gate.radius_x,
           radius_y=gate.radius_y,
           angle=gate.angle,
+          x_threshold=gate.x_threshold,
+          y_threshold=gate.y_threshold,
         )
       )
 
@@ -80,7 +82,7 @@ def build_workspace_save(file_ids: List[str] | None = None) -> WorkspaceSave:
 def load_workspace(ws: WorkspaceSave) -> WorkspaceLoadResult:
   """Load workspace: load files by path, apply compensation, create gates. Returns summary and data for frontend."""
   from models.file_models import ChannelMetadata, FileMetadata
-  from models.gate_models import BooleanGateCreate, EllipseGateCreate, GateCreateRequest, IntervalGateCreate, PolygonGateCreate, RectangleGateCreate
+  from models.gate_models import BooleanGateCreate, EllipseGateCreate, GateCreateRequest, IntervalGateCreate, PolygonGateCreate, QuadGateCreate, RectangleGateCreate
 
   if not ws.files:
     return WorkspaceLoadResult(files_loaded=0, compensation_applied=0, gates_created=0, gate_errors=[])
@@ -217,6 +219,12 @@ def load_workspace(ws: WorkspaceSave) -> WorkspaceLoadResult:
           radius_x=g.radius_x,
           radius_y=g.radius_y,
           angle=g.angle,
+        )
+      elif g.type == "quad" and g.x_threshold is not None and g.y_threshold is not None:
+        params = QuadGateCreate(
+          type="quad",
+          x_threshold=g.x_threshold,
+          y_threshold=g.y_threshold,
         )
       else:
         continue

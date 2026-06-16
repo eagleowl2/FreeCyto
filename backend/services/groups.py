@@ -1,15 +1,28 @@
-"""Sample group management, gating template extraction/application, and batch statistics."""
+"""Sample group management, gating template extraction/application, and batch statistics.
+
+Groups and their attached gating templates persist to ``~/.freecyto/groups.json``
+(overridable via ``OPENCYTO_DATA_DIR``), mirroring the layout and experiment stores so
+multi-sample setups survive a restart.
+"""
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger("opencyto")
+
 from models.gate_models import (
+  BooleanGateCreate,
+  EllipseGateCreate,
   GateCreateRequest,
   IntervalGateCreate,
   PolygonGateCreate,
+  QuadGateCreate,
   RectangleGateCreate,
 )
 from models.group_models import (
@@ -29,6 +42,52 @@ from services import gates as gates_service, storage
 
 _groups: dict[str, dict[str, Any]] = {}  # group_id -> {id, name, file_ids, template_id}
 _templates: dict[str, GatingTemplate] = {}  # template_id -> GatingTemplate
+
+
+# ---------------------------------------------------------------------------
+# Disk persistence (mirrors services/layouts.py)
+# ---------------------------------------------------------------------------
+
+
+def _groups_path() -> Path:
+  base = Path(os.getenv("OPENCYTO_DATA_DIR", Path.home() / ".freecyto"))
+  base.mkdir(parents=True, exist_ok=True)
+  return base / "groups.json"
+
+
+def _save_to_disk() -> None:
+  """Persist groups + templates to disk. Best-effort; never raises."""
+  try:
+    data = {
+      "version": 1,
+      "groups": list(_groups.values()),
+      "templates": [t.model_dump() for t in _templates.values()],
+    }
+    _groups_path().write_text(json.dumps(data, default=str, indent=2), encoding="utf-8")
+  except Exception:
+    logger.exception("Failed to persist groups to disk")
+
+
+def _load_from_disk() -> None:
+  """Load groups + templates from disk into the in-memory stores (best-effort)."""
+  path = _groups_path()
+  if not path.exists():
+    return
+  try:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    for grp in raw.get("groups", []):
+      _groups[grp["id"]] = {
+        "id": grp["id"],
+        "name": grp["name"],
+        "file_ids": list(grp.get("file_ids", [])),
+        "template_id": grp.get("template_id"),
+      }
+    for tpl in raw.get("templates", []):
+      template = GatingTemplate(**tpl)
+      _templates[template.id] = template
+    logger.info("Loaded %d groups, %d templates from %s", len(_groups), len(_templates), path)
+  except Exception:
+    logger.exception("Failed to load groups from disk — starting fresh")
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +129,7 @@ def create_group(name: str, file_ids: list[str]) -> GroupResponse:
     "file_ids": list(file_ids),
     "template_id": None,
   }
+  _save_to_disk()
   return _build_group_response(group_id)
 
 
@@ -87,10 +147,15 @@ def delete_group(group_id: str) -> None:
   if group_id not in _groups:
     raise KeyError(f"Group {group_id!r} not found")
   del _groups[group_id]
+  _save_to_disk()
 
 
 def reset_group_store() -> None:
-  """Clear all groups and templates (for tests)."""
+  """Clear all groups and templates in memory (for tests).
+
+  Like the layout store's clear(), this does NOT touch the disk file, so a test
+  teardown never wipes a real user's groups.json.
+  """
   _groups.clear()
   _templates.clear()
 
@@ -130,6 +195,14 @@ def create_template(group_id: str, source_file_id: str, template_name: str) -> G
         x_max=g.x_max,
         y_max=g.y_max,
         vertices=g.vertices,
+        expression=g.expression,
+        center_x=g.center_x,
+        center_y=g.center_y,
+        radius_x=g.radius_x,
+        radius_y=g.radius_y,
+        angle=g.angle,
+        x_threshold=g.x_threshold,
+        y_threshold=g.y_threshold,
       )
     )
 
@@ -142,14 +215,56 @@ def create_template(group_id: str, source_file_id: str, template_name: str) -> G
   )
   _templates[template_id] = template
   _groups[group_id]["template_id"] = template_id
+  _save_to_disk()
   return template
+
+
+def _template_gate_to_params(tg: TemplateGate):
+  """Build the discriminated gate-params object for a template gate, or None if incomplete.
+
+  Handles every gate type FreeCyto supports (rectangle, interval, polygon, boolean,
+  ellipse, quad). A quad node is recreated as a bare node — its four child rectangles
+  appear in the template as separate gates (parented by name) and are recreated normally.
+  """
+  if tg.type == "rectangle":
+    if any(v is None for v in (tg.x_min, tg.y_min, tg.x_max, tg.y_max)):
+      return None
+    return RectangleGateCreate(
+      type="rectangle",
+      x_min=tg.x_min, y_min=tg.y_min, x_max=tg.x_max, y_max=tg.y_max,  # type: ignore[arg-type]
+    )
+  if tg.type == "interval":
+    if tg.x_min is None or tg.x_max is None:
+      return None
+    return IntervalGateCreate(type="interval", x_min=tg.x_min, x_max=tg.x_max)
+  if tg.type == "polygon":
+    if not tg.vertices or len(tg.vertices) < 3:
+      return None
+    return PolygonGateCreate(type="polygon", vertices=tg.vertices)
+  if tg.type == "boolean":
+    if not tg.expression:
+      return None
+    return BooleanGateCreate(type="boolean", expression=tg.expression)
+  if tg.type == "ellipse":
+    if any(v is None for v in (tg.center_x, tg.center_y, tg.radius_x, tg.radius_y)):
+      return None
+    return EllipseGateCreate(
+      type="ellipse",
+      center_x=tg.center_x, center_y=tg.center_y,  # type: ignore[arg-type]
+      radius_x=tg.radius_x, radius_y=tg.radius_y, angle=tg.angle,  # type: ignore[arg-type]
+    )
+  if tg.type == "quad":
+    if tg.x_threshold is None or tg.y_threshold is None:
+      return None
+    return QuadGateCreate(type="quad", x_threshold=tg.x_threshold, y_threshold=tg.y_threshold)
+  return None  # unknown type
 
 
 def apply_template(template_id: str, target_file_id: str) -> list[str]:
   """Apply gating template to *target_file_id*, creating gates in tree order.
 
   Duplicate-name gates are silently skipped (idempotent). Returns a list of
-  newly created gate IDs.
+  newly created gate IDs. All gate types are supported (see _template_gate_to_params).
   """
   if template_id not in _templates:
     raise KeyError(f"Template {template_id!r} not found")
@@ -161,31 +276,9 @@ def apply_template(template_id: str, target_file_id: str) -> list[str]:
   for tg in template.gates:
     parent_gate_id = name_to_id.get(tg.parent_name) if tg.parent_name else None
 
-    # Build discriminated gate params
-    if tg.type == "rectangle":
-      if any(v is None for v in (tg.x_min, tg.y_min, tg.x_max, tg.y_max)):
-        continue
-      params: RectangleGateCreate | PolygonGateCreate | IntervalGateCreate = RectangleGateCreate(
-        type="rectangle",
-        x_min=tg.x_min,  # type: ignore[arg-type]
-        y_min=tg.y_min,  # type: ignore[arg-type]
-        x_max=tg.x_max,  # type: ignore[arg-type]
-        y_max=tg.y_max,  # type: ignore[arg-type]
-      )
-    elif tg.type == "interval":
-      if tg.x_min is None or tg.x_max is None:
-        continue
-      params = IntervalGateCreate(
-        type="interval",
-        x_min=tg.x_min,
-        x_max=tg.x_max,
-      )
-    elif tg.type == "polygon":
-      if not tg.vertices or len(tg.vertices) < 3:
-        continue
-      params = PolygonGateCreate(type="polygon", vertices=tg.vertices)
-    else:
-      continue  # unknown type
+    params = _template_gate_to_params(tg)
+    if params is None:
+      continue  # incomplete or unknown gate type
 
     req = GateCreateRequest(
       file_id=target_file_id,
@@ -270,3 +363,7 @@ def get_batch_stats(group_id: str, gate_name: str) -> BatchStatsResponse:
       )
 
   return BatchStatsResponse(group_id=group_id, gate_name=gate_name, rows=rows)
+
+
+# Load any persisted groups/templates at import (cleared per-test by conftest).
+_load_from_disk()

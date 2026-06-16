@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+
+# Isolate on-disk persistence (layouts, experiments, groups) to a throwaway dir for
+# the whole test session, so running the suite never overwrites a real user's
+# ~/.freecyto/*.json. Set BEFORE importing services — their singletons load on import.
+# Tests that need their own data dir still override this via monkeypatch.setenv.
+if "OPENCYTO_DATA_DIR" not in os.environ:
+  os.environ["OPENCYTO_DATA_DIR"] = tempfile.mkdtemp(prefix="freecyto_test_data_")
 
 import pytest
 

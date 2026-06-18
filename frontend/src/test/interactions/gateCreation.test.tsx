@@ -64,7 +64,7 @@ describe("Rectangle gate creation — click sequence", () => {
     expect(payload.params.type).toBe("rectangle");
     expect(payload.params.x_min).toBeTypeOf("number");
     expect(payload.params.x_max).toBeGreaterThan(payload.params.x_min);
-    expect(payload.transform_x).toBe("linear");
+    expect(payload.transform_x).toBe("log"); // DEFAULT_X_TRANSFORM is "log" (set in App.tsx line 56)
   });
 
   it("sends parent_gate_id when a gate is active", async () => {
@@ -73,8 +73,18 @@ describe("Rectangle gate creation — click sequence", () => {
     // Now performs the full draw sequence and asserts unconditionally.
     useGateCapture({ id: "child-g", name: "Child", count: 200, pct_total: 5.0 });
 
-    // Override gate tree to return one parent gate
+    // Override gate tree to return one parent gate, and mock the gate-specific
+    // density endpoint that the plot effect calls when activeGateId is set.
     server.use(
+      http.get("http://127.0.0.1:8765/api/gates/:gateId/density", () =>
+        HttpResponse.json({
+          file_id: "test-file-id", x_channel: "FSC-A", y_channel: "SSC-A",
+          transform_x: "linear", transform_y: "linear",
+          x_min: 0, x_max: 5.4, y_min: 0, y_max: 5.4,
+          bins_x: 10, bins_y: 10,
+          counts: Array.from({ length: 10 }, () => Array.from({ length: 10 }, () => 1)),
+        }),
+      ),
       http.get("http://127.0.0.1:8765/api/files/:fileId/gates", () =>
         HttpResponse.json([
           {
@@ -112,12 +122,24 @@ describe("Rectangle gate creation — click sequence", () => {
       openFcsFiles: vi.fn().mockResolvedValue(["/fake/WBC_CP8.fcs"]),
     };
     await user.click(screen.getByText(/Browse FCS/i));
-    await waitFor(() => screen.getByText(/Lymphocytes/));
 
-    // Select parent gate — makes it the active gate; new gates drawn will be children.
-    await user.click(screen.getByText(/Lymphocytes/));
+    // Wait for gate tree to render "Lymphocytes". Multiple DOM elements contain that
+    // text (tree panel span + SVG plot label), so use getAllByText + pick the span.
+    await waitFor(() => screen.getAllByText(/Lymphocytes/));
+    const gateLabel = screen
+      .getAllByText(/Lymphocytes/)
+      .find((el) => el.tagName.toLowerCase() === "span");
+    expect(gateLabel).toBeDefined();
 
-    // Ensure the draw overlay is mounted (draw mode activates after gate selection in tree)
+    // Step 1: Click gate label → sets activeGateId="parent-g", clears drawMode (by design —
+    // onSelectGate in App.tsx always resets drawMode to avoid accidental child creation).
+    await user.click(gateLabel!);
+
+    // Step 2: Click "+" next to the gate → calls onCreateChild → sets drawMode=true while
+    // preserving activeGateId. This is the correct UX path for adding a child gate.
+    await user.click(screen.getByTitle(/Add child gate/i));
+
+    // Draw overlay is now mounted (drawMode=true, file!=null).
     await waitFor(() => expect(screen.getByTestId("gate-draw-overlay")).toBeInTheDocument());
     const drawArea = screen.getByTestId("gate-draw-overlay") as HTMLElement;
     const rect = { left: 68, top: 12, width: 400, height: 400, right: 468, bottom: 412 };

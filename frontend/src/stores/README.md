@@ -27,8 +27,8 @@ least-coupled first.
 | # | Store | State migrated | Status |
 |---|-------|----------------|--------|
 | 1 | `uiStore` | Panel/modal visibility + section expand toggles (13 flags) | ✅ done |
-| 2 | plot/view settings (plotMode, colormap, transforms, zoom, bg) | — | planned |
-| 3 | gates (gateTree, activeGateId, stats, tools) | — | planned |
+| 2 | `plotStore` | Plot/view settings: plotMode, density colormap + scale, bg theme, x/y transforms, backgate + contour toggles, zoom/pan (10 fields) | ✅ done |
+| 3 | `gateStore` | gates (gateTree, activeGateId, stats, drawing tools) | — | planned |
 | 4 | compensation (spillover matrix, status) | — | planned |
 | 5 | groups / templates | — | planned |
 | 6 | plates | — | planned |

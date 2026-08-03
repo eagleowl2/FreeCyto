@@ -11,6 +11,14 @@ import { ScatterCanvas } from "./ScatterCanvas";
 import { AxisTicks } from "./AxisTicks";
 import { plotScaledMargins } from "./plotMargins";
 import { useUiStore } from "./stores/uiStore";
+import {
+  usePlotStore,
+  DEFAULT_X_TRANSFORM,
+  DEFAULT_Y_TRANSFORM,
+  VALID_DENSITY_COLORMAPS,
+  PLOT_BG_STORAGE_KEY,
+  type ZoomState,
+} from "./stores/plotStore";
 
 type HealthState =
   | { status: "idle" }
@@ -53,9 +61,7 @@ type DragState = {
 };
 
 const API_BASE = "http://127.0.0.1:8765";
-const DEFAULT_X_TRANSFORM: "linear" | "log" | "arcsinh" | "logicle" = "log";
-const DEFAULT_Y_TRANSFORM: "linear" | "log" | "arcsinh" | "logicle" = "linear";
-const VALID_DENSITY_COLORMAPS: readonly DensityColormap[] = ["jet", "viridis", "inferno"];
+// DEFAULT_X_TRANSFORM / DEFAULT_Y_TRANSFORM / VALID_DENSITY_COLORMAPS → plotStore (Phase X)
 
 type ChannelInfo = {
   name: string;
@@ -131,6 +137,23 @@ export const App: React.FC = () => {
     popExpanded, setPopExpanded,
   } = useUiStore();
 
+  // Phase X (slice 2): plot/view settings now live in src/stores/plotStore.ts.
+  // Same convention as slice 1 — setters keep the React useState signature, so
+  // every call site below (setZoom(null), setTransformX(next), setShowContours
+  // ((c) => !c), …) is unchanged.
+  const {
+    plotMode, setPlotMode,
+    densityColormap, setDensityColormap,
+    densityDisplayScale, setDensityDisplayScale,
+    plotBgMode, setPlotBgMode,
+    transformX, setTransformX,
+    transformY, setTransformY,
+    showBackgate, setShowBackgate,
+    showContours, setShowContours,
+    zoom, setZoom,
+    isPanning, setIsPanning,
+  } = usePlotStore();
+
   const [health, setHealth] = React.useState<HealthState>({ status: "idle" });
 
   const [fcsPath, setFcsPath] = React.useState("");
@@ -148,25 +171,9 @@ export const App: React.FC = () => {
   const [channels, setChannels] = React.useState<ChannelInfo[]>([]);
   const [xChannel, setXChannel] = React.useState("");
   const [yChannel, setYChannel] = React.useState("");
-  const [plotMode, setPlotMode] = React.useState<"points" | "density" | "histogram">("density");
-  const [densityColormap, setDensityColormap] = React.useState<DensityColormap>("jet");
-  const [densityDisplayScale, setDensityDisplayScale] = React.useState<DensityScale>("log");
-  const [plotBgMode, setPlotBgMode] = React.useState<"dark" | "white">(() => {
-    try {
-      return globalThis.localStorage?.getItem("freecyto_plot_bg") === "white" ? "white" : "dark";
-    } catch {
-      return "dark";
-    }
-  });
-  const [transformX, setTransformX] = React.useState<"linear" | "log" | "arcsinh" | "logicle">(
-    DEFAULT_X_TRANSFORM,
-  );
-  const [transformY, setTransformY] = React.useState<"linear" | "log" | "arcsinh" | "logicle">(
-    DEFAULT_Y_TRANSFORM,
-  );
+  // plotMode / densityColormap / densityDisplayScale / plotBgMode / transformX /
+  // transformY / showBackgate → plotStore (Phase X)
   const [points, setPoints] = React.useState<ScatterPoint[]>([]);
-  // R-3: Backgating - show parent population as faded background overlay
-  const [showBackgate, setShowBackgate] = React.useState<boolean>(false);
   const [backgatePoints, setBackgatePoints] = React.useState<ScatterPoint[]>([]);
   /** Min/max in current transform space (plot axes). Gate coordinates are in this space. */
   const [transformedRange, setTransformedRange] = React.useState<{
@@ -317,8 +324,7 @@ export const App: React.FC = () => {
   const [histOverlayIds, setHistOverlayIds] = React.useState<string[]>([]);
   const [histOverlayData, setHistOverlayData] = React.useState<Record<string, HistogramData>>({});
 
-  // O: density contour lines toggle
-  const [showContours, setShowContours] = React.useState(false);
+  // O: density contour lines toggle → plotStore (Phase X)
 
   // P-1: Plate layout panel
   type PlateWellInfo = { well_id: string; row: number; col: number; file_id: string | null; label: string | null };
@@ -338,10 +344,7 @@ export const App: React.FC = () => {
   const [plateAssignWellId, setPlateAssignWellId] = React.useState<string | null>(null);
 
   // P-2: plot zoom/pan
-  type ZoomState = { xMin: number; xMax: number; yMin: number; yMax: number };
-  const [zoom, setZoom] = React.useState<ZoomState | null>(null);
-  /** True while the user is pan-dragging (Space+drag) — used for cursor style only. */
-  const [isPanning, setIsPanning] = React.useState(false);
+  // zoom / isPanning → plotStore (Phase X); ZoomState type is imported from there.
   /** Ref so wheel/pan handlers always see the latest zoom without re-registering listeners. */
   const zoomRef = React.useRef<ZoomState | null>(null);
   zoomRef.current = zoom;
@@ -429,7 +432,7 @@ export const App: React.FC = () => {
 
   React.useEffect(() => {
     try {
-      globalThis.localStorage?.setItem("freecyto_plot_bg", plotBgMode);
+      globalThis.localStorage?.setItem(PLOT_BG_STORAGE_KEY, plotBgMode);
     } catch {
       /* ignore */
     }

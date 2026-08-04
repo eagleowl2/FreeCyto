@@ -29,7 +29,7 @@ least-coupled first.
 | 1 | `uiStore` | Panel/modal visibility + section expand toggles (13 flags) | ✅ done |
 | 2 | `plotStore` | Plot/view settings: plotMode, density colormap + scale, bg theme, x/y transforms, backgate + contour toggles, zoom/pan (10 fields) | ✅ done |
 | 3 | `gateDrawStore` | Gate drawing/tool interaction: gateTool, drawMode, in-progress + pending shapes, drag preview, name error (10 fields) | ✅ done |
-| 4 | `gateDataStore` | Gate data: gateTree, activeGateId, gate stats, loading/error flags, sort columns | — | planned |
+| 4 | `gateDataStore` | Gate data: gateTree, activeGateId, gateMessage, gate stats, loading/error flags, stats + population sort columns (11 fields) | ✅ done |
 | 5 | compensation (spillover matrix, status) | — | planned |
 | 6 | groups / templates | — | planned |
 | 7 | plates | — | planned |
@@ -40,6 +40,12 @@ transient pointer/keyboard state with no I/O, while the data half is driven by
 async effects against `/api/files/:id/gates` and `/api/gates/:id/stats`. Keeping
 them apart made slice 3 the same zero-risk declaration-site substitution as
 slices 1–2.
+
+Slice 4 keeps that property by drawing the line at **state vs I/O**: the store
+owns the gate data, but `fetchGateTree` / `fetchGateStats` stay in `App.tsx` and
+simply call the store's setters. Moving the fetching itself into the store would
+be a genuine behaviour change (request lifecycle, cancellation, dedup) and is
+deliberately out of scope for the migration.
 
 ## Test isolation
 

@@ -5,6 +5,7 @@ import { server } from "./mocks/server";
 import { resetUiStore } from "../stores/uiStore";
 import { resetPlotStore } from "../stores/plotStore";
 import { resetGateDrawStore } from "../stores/gateDrawStore";
+import { resetGateDataStore } from "../stores/gateDataStore";
 
 // MSW
 beforeAll(() => server.listen({ onUnhandledRequest: "warn" }));
@@ -27,6 +28,7 @@ afterEach(() => {
   resetUiStore();
   resetPlotStore();
   resetGateDrawStore();
+  resetGateDataStore();
 });
 
 // ResizeObserver

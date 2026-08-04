@@ -20,6 +20,12 @@ import {
   type ZoomState,
 } from "./stores/plotStore";
 import { useGateDrawStore, type BoundsSnapshot } from "./stores/gateDrawStore";
+import {
+  useGateDataStore,
+  type GateStatsData,
+  type StatsSortCol,
+  type PopulationSortCol,
+} from "./stores/gateDataStore";
 
 type HealthState =
   | { status: "idle" }
@@ -172,6 +178,24 @@ export const App: React.FC = () => {
     gateNameError, setGateNameError,
   } = useGateDrawStore();
 
+  // Phase X (slice 4): gate data + stats now live in src/stores/gateDataStore.ts.
+  // The fetch functions (fetchGateTree / fetchGateStats) stay in this file — the
+  // store owns the state, not the I/O — so setters keep the React useState
+  // signature and every call site below is unchanged.
+  const {
+    gateTree, setGateTree,
+    activeGateId, setActiveGateId,
+    gateTreeLoading, setGateTreeLoading,
+    gateTreeError, setGateTreeError,
+    gateMessage, setGateMessage,
+    gateStats, setGateStats,
+    gateStatsLoading, setGateStatsLoading,
+    statsSortCol, setStatsSortCol,
+    statsSortDir, setStatsSortDir,
+    popSortCol, setPopSortCol,
+    popSortDir, setPopSortDir,
+  } = useGateDataStore();
+
   const [health, setHealth] = React.useState<HealthState>({ status: "idle" });
 
   const [fcsPath, setFcsPath] = React.useState("");
@@ -201,26 +225,10 @@ export const App: React.FC = () => {
     yMax: number;
   } | null>(null);
   const [density, setDensity] = React.useState<DensityData | null>(null);
-  const [gateMessage, setGateMessage] = React.useState<string | null>(null);
-  const [gateTree, setGateTree] = React.useState<GateNode[]>([]);
-  const [activeGateId, setActiveGateId] = React.useState<string | null>(null);
-  const [gateTreeLoading, setGateTreeLoading] = React.useState(false);
-  const [gateTreeError, setGateTreeError] = React.useState<string | null>(null);
-
-  // G: per-gate channel statistics
-  type ChannelStat = { channel_name: string; display_name: string; mean: number; median: number; sd: number; cv: number | null };
-  type GateStatsData = {
-    gate_id: string; gate_name: string; count: number;
-    pct_of_parent: number; pct_total: number;
-    channel_stats: ChannelStat[];
-  };
-  const [gateStats, setGateStats] = React.useState<GateStatsData | null>(null);
-  const [gateStatsLoading, setGateStatsLoading] = React.useState(false);
+  // gateMessage / gateTree / activeGateId / gateTreeLoading / gateTreeError,
+  // G: per-gate channel statistics (gateStats, gateStatsLoading) and
+  // P-3: stats table sort (statsSortCol, statsSortDir) → gateDataStore (Phase X).
   // statsExpanded → uiStore (Phase X)
-  // P-3: column sort for stats table
-  type StatsSortCol = "channel" | "mean" | "median" | "sd" | "cv";
-  const [statsSortCol, setStatsSortCol] = React.useState<StatsSortCol>("channel");
-  const [statsSortDir, setStatsSortDir] = React.useState<"asc" | "desc">("asc");
   const gateList = React.useMemo(() => flattenTree(gateTree), [gateTree]);
 
   // Q-1: Batch gate copy
@@ -231,10 +239,7 @@ export const App: React.FC = () => {
   const [applyGatesLoading, setApplyGatesLoading] = React.useState(false);
   const [applyGatesMessage, setApplyGatesMessage] = React.useState<string>("");
 
-  // Q-2: Population summary report
-  type PopulationSortCol = "name" | "count" | "pct_parent" | "pct_total";
-  const [popSortCol, setPopSortCol] = React.useState<PopulationSortCol>("name");
-  const [popSortDir, setPopSortDir] = React.useState<"asc" | "desc">("asc");
+  // Q-2: Population summary report — popSortCol/popSortDir → gateDataStore (Phase X)
   // popExpanded → uiStore (Phase X)
 
   // Q-3: Gate layout save/restore

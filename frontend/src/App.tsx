@@ -1550,6 +1550,70 @@ export const App: React.FC = () => {
   const plotDimsRef = React.useRef({ plotW, plotH, ml, mt, plotAreaW, plotAreaH });
   plotDimsRef.current = { plotW, plotH, ml, mt, plotAreaW, plotAreaH };
 
+  /**
+   * Finalise an in-progress rubber-band drag (rectangle / ellipse / interval):
+   * promote it to a "pending" gate awaiting a name, then leave draw mode.
+   *
+   * This used to be the draw overlay's `onMouseUp`, which meant releasing the
+   * button anywhere outside the plot never ended the drag — the band then kept
+   * following the cursor with no button held, and the next click completed a
+   * gate the user never meant to draw. It is now registered on `window` while a
+   * drag is active (see the effect below) so the release is caught wherever it
+   * happens. Polygon and quadrant gates are click-driven, not drag-driven, so
+   * they are unaffected.
+   */
+  const finishDrag = React.useCallback(() => {
+    if (gateTool === "interval" && drawingInterval && transformedRange) {
+      const nxMin = Math.min(drawingInterval.startX, drawingInterval.endX);
+      const nxMax = Math.max(drawingInterval.startX, drawingInterval.endX);
+      if (nxMax - nxMin > 0.01) {
+        // P-2: use viewRange so interval drawn while zoomed maps to correct data coords.
+        const r = viewRange ?? transformedRange;
+        const xMin_ = r.xMin + (r.xMax - r.xMin) * nxMin;
+        const xMax_ = r.xMin + (r.xMax - r.xMin) * nxMax;
+        setPendingInterval({ xMin: xMin_, xMax: xMax_, gateName: "" });
+      }
+      setDrawingInterval(null);
+      setDrawMode(false);
+      return;
+    }
+    if (!drawingRect) return;
+    const nxMin = Math.min(drawingRect.startX, drawingRect.endX);
+    const nxMax = Math.max(drawingRect.startX, drawingRect.endX);
+    const nyMin = Math.min(drawingRect.startY, drawingRect.endY);
+    const nyMax = Math.max(drawingRect.startY, drawingRect.endY);
+    const bigEnough = nxMax - nxMin > 0.01 && nyMax - nyMin > 0.01;
+    if (gateTool === "rectangle") {
+      if (bigEnough) setPendingGate({ nxMin, nyMin, nxMax, nyMax, gateName: "" });
+      setDrawingRect(null);
+      setDrawMode(false);
+    } else if (gateTool === "ellipse") {
+      if (bigEnough) {
+        setPendingEllipse({
+          nCx: (nxMin + nxMax) / 2,
+          nCy: (nyMin + nyMax) / 2,
+          nRx: (nxMax - nxMin) / 2,
+          nRy: (nyMax - nyMin) / 2,
+          gateName: "",
+        });
+      }
+      setDrawingRect(null);
+      setDrawMode(false);
+    }
+  }, [
+    gateTool, drawingInterval, drawingRect, transformedRange, viewRange,
+    setPendingInterval, setDrawingInterval, setDrawMode, setPendingGate,
+    setDrawingRect, setPendingEllipse,
+  ]);
+
+  // Catch the mouse release anywhere on the page, not just over the plot. Only
+  // registered while a drag is actually in progress.
+  React.useEffect(() => {
+    if (!drawingRect && !drawingInterval) return;
+    window.addEventListener("mouseup", finishDrag);
+    return () => window.removeEventListener("mouseup", finishDrag);
+  }, [drawingRect, drawingInterval, finishDrag]);
+
   // P-2: Canvas inner-div positioning for zoom (percentage of clip div).
   // The clip div covers the plot area [ml,mt,plotAreaW,plotAreaH].
   // The data canvas covers transformedRange; viewRange is the visible sub-window.
@@ -4149,50 +4213,9 @@ export const App: React.FC = () => {
                   const y = 1 - yDown;
                   setDrawingRect((r) => (r ? { ...r, endX: x, endY: y } : null));
                 }}
-                onMouseUp={() => {
-                  if (gateTool === "interval" && drawingInterval && transformedRange) {
-                    const nxMin = Math.min(drawingInterval.startX, drawingInterval.endX);
-                    const nxMax = Math.max(drawingInterval.startX, drawingInterval.endX);
-                    if (nxMax - nxMin > 0.01) {
-                      // P-2: use viewRange so interval drawn while zoomed maps to correct data coords.
-                      const r = viewRange ?? transformedRange;
-                      const xMin_ = r.xMin + (r.xMax - r.xMin) * nxMin;
-                      const xMax_ = r.xMin + (r.xMax - r.xMin) * nxMax;
-                      setPendingInterval({ xMin: xMin_, xMax: xMax_, gateName: "" });
-                    }
-                    setDrawingInterval(null);
-                    setDrawMode(false);
-                    return;
-                  }
-                  if (gateTool === "rectangle" && drawingRect) {
-                    const nxMin = Math.min(drawingRect.startX, drawingRect.endX);
-                    const nxMax = Math.max(drawingRect.startX, drawingRect.endX);
-                    const nyMin = Math.min(drawingRect.startY, drawingRect.endY);
-                    const nyMax = Math.max(drawingRect.startY, drawingRect.endY);
-                    if (nxMax - nxMin > 0.01 && nyMax - nyMin > 0.01) {
-                      setPendingGate({ nxMin, nyMin, nxMax, nyMax, gateName: "" });
-                    }
-                    setDrawingRect(null);
-                    setDrawMode(false);
-                  }
-                  if (gateTool === "ellipse" && drawingRect) {
-                    const nxMin = Math.min(drawingRect.startX, drawingRect.endX);
-                    const nxMax = Math.max(drawingRect.startX, drawingRect.endX);
-                    const nyMin = Math.min(drawingRect.startY, drawingRect.endY);
-                    const nyMax = Math.max(drawingRect.startY, drawingRect.endY);
-                    if (nxMax - nxMin > 0.01 && nyMax - nyMin > 0.01) {
-                      setPendingEllipse({
-                        nCx: (nxMin + nxMax) / 2,
-                        nCy: (nyMin + nyMax) / 2,
-                        nRx: (nxMax - nxMin) / 2,
-                        nRy: (nyMax - nyMin) / 2,
-                        gateName: "",
-                      });
-                    }
-                    setDrawingRect(null);
-                    setDrawMode(false);
-                  }
-                }}
+                // No onMouseUp here — the release is handled by a window-level
+                // listener (finishDrag) so it is caught even when the button is
+                // released outside the plot.
               />
             )}
             <svg

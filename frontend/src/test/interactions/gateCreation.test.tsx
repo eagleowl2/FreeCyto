@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../mocks/server";
@@ -65,6 +65,43 @@ describe("Rectangle gate creation — click sequence", () => {
     expect(payload.params.x_min).toBeTypeOf("number");
     expect(payload.params.x_max).toBeGreaterThan(payload.params.x_min);
     expect(payload.transform_x).toBe("log"); // DEFAULT_X_TRANSFORM is "log" (set in App.tsx line 56)
+  });
+
+  it("finishes the drag when the mouse is released outside the plot", async () => {
+    // Regression: the mouseup handler used to live on the draw overlay, so
+    // releasing the button anywhere else (sidebar, page chrome) never ended the
+    // drag. The rubber band then kept following the cursor with no button held
+    // and the next click completed a gate the user never meant to draw. The
+    // release is now caught by a window-level listener.
+    useGateCapture();
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => screen.getByText(/Connected/i));
+
+    (window as any).opencyto = {
+      openFcsFiles: vi.fn().mockResolvedValue(["/fake/WBC_CP8.fcs"]),
+    };
+    await user.click(screen.getByText(/Browse FCS/i));
+    await waitFor(() => expect(screen.getByTestId("file-event-count")).toBeInTheDocument());
+
+    await user.click(screen.getByText(/Poly/i));
+    await user.click(screen.getByText(/Rect/i));
+    await waitFor(() => expect(screen.getByTestId("gate-draw-overlay")).toBeInTheDocument());
+
+    const drawArea = screen.getByTestId("gate-draw-overlay") as HTMLElement;
+    const rect = { left: 68, top: 12, width: 400, height: 400, right: 468, bottom: 412 };
+    vi.spyOn(drawArea, "getBoundingClientRect").mockReturnValue(rect as DOMRect);
+
+    // Press and drag inside the plot…
+    fireEvent.mouseDown(drawArea, { clientX: 68 + 80, clientY: 12 + 80, buttons: 1 });
+    fireEvent.mouseMove(drawArea, { clientX: 68 + 240, clientY: 12 + 240, buttons: 1 });
+    // …but release the button OUTSIDE it.
+    fireEvent.mouseUp(document.body);
+
+    // The drag must still finalise into a named-gate prompt.
+    await waitFor(() => expect(screen.getByPlaceholderText(/Gate name/i)).toBeInTheDocument());
+    // And draw mode must be over — no overlay left armed to swallow the next click.
+    expect(screen.queryByTestId("gate-draw-overlay")).not.toBeInTheDocument();
   });
 
   it("sends parent_gate_id when a gate is active", async () => {

@@ -2,6 +2,9 @@ import "@testing-library/jest-dom";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
+import { resetUiStore } from "../stores/uiStore";
+import { resetPlotStore } from "../stores/plotStore";
+import { resetGateDrawStore } from "../stores/gateDrawStore";
 
 // MSW
 beforeAll(() => server.listen({ onUnhandledRequest: "warn" }));
@@ -13,6 +16,17 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.restoreAllMocks();
+});
+
+// Phase X: the Zustand stores are module-level singletons, so — unlike the
+// `useState` hooks they replaced — they do NOT reset when App unmounts. Without
+// this, state written by one test (an armed gate tool, an open panel, a zoom
+// window) leaks into the next test in the same file. Reset them alongside the
+// React cleanup so every test starts from the documented initial state.
+afterEach(() => {
+  resetUiStore();
+  resetPlotStore();
+  resetGateDrawStore();
 });
 
 // ResizeObserver

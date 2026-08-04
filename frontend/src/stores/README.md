@@ -28,11 +28,26 @@ least-coupled first.
 |---|-------|----------------|--------|
 | 1 | `uiStore` | Panel/modal visibility + section expand toggles (13 flags) | ✅ done |
 | 2 | `plotStore` | Plot/view settings: plotMode, density colormap + scale, bg theme, x/y transforms, backgate + contour toggles, zoom/pan (10 fields) | ✅ done |
-| 3 | `gateStore` | gates (gateTree, activeGateId, stats, drawing tools) | — | planned |
-| 4 | compensation (spillover matrix, status) | — | planned |
-| 5 | groups / templates | — | planned |
-| 6 | plates | — | planned |
-| 7 | files / channels | — | planned |
+| 3 | `gateDrawStore` | Gate drawing/tool interaction: gateTool, drawMode, in-progress + pending shapes, drag preview, name error (10 fields) | ✅ done |
+| 4 | `gateDataStore` | Gate data: gateTree, activeGateId, gate stats, loading/error flags, sort columns | — | planned |
+| 5 | compensation (spillover matrix, status) | — | planned |
+| 6 | groups / templates | — | planned |
+| 7 | plates | — | planned |
+| 8 | files / channels | — | planned |
+
+The gate domain was deliberately split across slices 3 and 4: the drawing half is
+transient pointer/keyboard state with no I/O, while the data half is driven by
+async effects against `/api/files/:id/gates` and `/api/gates/:id/stats`. Keeping
+them apart made slice 3 the same zero-risk declaration-site substitution as
+slices 1–2.
+
+## Test isolation
+
+Because the stores are module-level singletons, they do **not** reset when a
+component unmounts the way the `useState` hooks they replaced did. `src/test/
+setup.ts` calls every `reset*Store()` in a global `afterEach` so state written by
+one test cannot leak into the next. **Add a `reset` call there whenever you add a
+store.**
 
 The Experiment/Group/Sample hierarchy already lives in
 `src/context/ExperimentContext.tsx` (Phase T) and is left as-is for now.

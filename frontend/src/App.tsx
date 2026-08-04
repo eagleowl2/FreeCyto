@@ -19,6 +19,7 @@ import {
   PLOT_BG_STORAGE_KEY,
   type ZoomState,
 } from "./stores/plotStore";
+import { useGateDrawStore, type BoundsSnapshot } from "./stores/gateDrawStore";
 
 type HealthState =
   | { status: "idle" }
@@ -37,7 +38,7 @@ type LoadedFile = {
 
 type ScatterPoint = { x: number; y: number };
 
-type BoundsSnapshot = { x_min: number; y_min: number; x_max: number; y_max: number };
+// BoundsSnapshot → gateDrawStore (Phase X); imported above, still used by UndoAction.
 type UndoAction =
   | { type: "create"; gateId: string }
   | { type: "create_batch"; gateIds: string[] }
@@ -154,6 +155,23 @@ export const App: React.FC = () => {
     isPanning, setIsPanning,
   } = usePlotStore();
 
+  // Phase X (slice 3): gate drawing / tool interaction state now lives in
+  // src/stores/gateDrawStore.ts. Gate *data* (gateTree, activeGateId, stats)
+  // stays here for now — it is driven by async fetch effects and is migrated
+  // separately in slice 4. Setters keep the React useState signature.
+  const {
+    gateTool, setGateTool,
+    drawMode, setDrawMode,
+    drawingRect, setDrawingRect,
+    drawingPolygon, setDrawingPolygon,
+    drawingInterval, setDrawingInterval,
+    pendingGate, setPendingGate,
+    pendingEllipse, setPendingEllipse,
+    pendingInterval, setPendingInterval,
+    previewGate, setPreviewGate,
+    gateNameError, setGateNameError,
+  } = useGateDrawStore();
+
   const [health, setHealth] = React.useState<HealthState>({ status: "idle" });
 
   const [fcsPath, setFcsPath] = React.useState("");
@@ -243,24 +261,8 @@ export const App: React.FC = () => {
       ),
     [gateList, activeGateId, xChannel, yChannel],
   );
-  const [gateNameError, setGateNameError] = React.useState<string | null>(null);
-  const [drawingRect, setDrawingRect] = React.useState<
-    { startX: number; startY: number; endX: number; endY: number } | null
-  >(null);
-  const [pendingGate, setPendingGate] = React.useState<{
-    nxMin: number;
-    nyMin: number;
-    nxMax: number;
-    nyMax: number;
-    gateName: string;
-  } | null>(null);
-  const [gateTool, setGateTool] = React.useState<"rectangle" | "polygon" | "quadrant" | "ellipse" | "interval" | "boolean" | null>("rectangle");
-  // N: pending ellipse gate (after drag, before name + submit)
-  const [pendingEllipse, setPendingEllipse] = React.useState<{
-    nCx: number; nCy: number; nRx: number; nRy: number; gateName: string;
-  } | null>(null);
-  const [drawMode, setDrawMode] = React.useState(false);
-  const [drawingPolygon, setDrawingPolygon] = React.useState<{ points: { x: number; y: number }[] } | null>(null);
+  // gateNameError / drawingRect / pendingGate / gateTool / pendingEllipse (N) /
+  // drawMode / drawingPolygon → gateDrawStore (Phase X)
   const [fcsStatus, setFcsStatus] = React.useState<
     "idle" | "loading" | "loaded" | "error"
   >("idle");
@@ -274,15 +276,10 @@ export const App: React.FC = () => {
   const redoStackRef = React.useRef<UndoAction[]>([]);
   // H: gate drag state (ref = no re-render during mousemove; previewGate is the visual state)
   const dragRef = React.useRef<DragState | null>(null);
-  const [previewGate, setPreviewGate] = React.useState<
-    | (BoundsSnapshot & { id: string; kind: "rect" })
-    | { id: string; kind: "poly"; vertices: number[][] }
-    | null
-  >(null);
+  // previewGate → gateDrawStore (Phase X)
   // I: histogram + interval gate state
   const [histData, setHistData] = React.useState<HistogramData | null>(null);
-  const [drawingInterval, setDrawingInterval] = React.useState<{ startX: number; endX: number } | null>(null);
-  const [pendingInterval, setPendingInterval] = React.useState<{ xMin: number; xMax: number; gateName: string } | null>(null);
+  // drawingInterval / pendingInterval → gateDrawStore (Phase X)
 
   // T: Experiment hierarchy + Table panel — visibility flags moved to uiStore (Phase X).
 

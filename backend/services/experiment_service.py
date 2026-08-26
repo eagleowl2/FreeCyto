@@ -17,6 +17,8 @@ from pathlib import Path
 from threading import Lock
 from typing import List
 
+from timeutils import utcnow as _utcnow
+
 from models.experiment_models import (
     ExperimentCreateRequest,
     ExperimentListItem,
@@ -162,7 +164,7 @@ class ExperimentStore:
                 exp.default_plate_format = req.default_plate_format
             if req.meta is not None:
                 exp.meta = req.meta
-            exp.modified_date = datetime.utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
         return exp
 
@@ -187,7 +189,7 @@ class ExperimentStore:
                 template_id=req.template_id,
             )
             exp.groups[group.id] = group
-            exp.modified_date = datetime.utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
         return group
 
@@ -212,7 +214,7 @@ class ExperimentStore:
                 grp.description = req.description
             if req.template_id is not None:
                 grp.template_id = req.template_id
-            exp.modified_date = datetime.utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
         return grp
 
@@ -224,7 +226,7 @@ class ExperimentStore:
             if group_id not in exp.groups:
                 raise KeyError(f"Group '{group_id}' not found")
             del exp.groups[group_id]
-            exp.modified_date = datetime.utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
 
     # ── sample CRUD ──────────────────────────────────────────────────────────
@@ -246,7 +248,7 @@ class ExperimentStore:
                 meta=req.meta,
             )
             grp.samples[sample.id] = sample
-            exp.modified_date = datetime.utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
         return sample
 
@@ -285,8 +287,8 @@ class ExperimentStore:
                 s.gate_count = req.gate_count
             if req.meta is not None:
                 s.meta = req.meta
-            s.modified_date = datetime.utcnow()
-            exp.modified_date = datetime.utcnow()
+            s.modified_date = _utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
         return s
 
@@ -301,7 +303,7 @@ class ExperimentStore:
             if sample_id not in grp.samples:
                 raise KeyError(f"Sample '{sample_id}' not found")
             del grp.samples[sample_id]
-            exp.modified_date = datetime.utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
 
     # ── bulk helpers ─────────────────────────────────────────────────────────
@@ -328,7 +330,7 @@ class ExperimentStore:
             if sample is None:
                 raise KeyError(f"Sample '{sample_id}' not found in group '{src_group_id}'")
             dst.samples[sample_id] = sample
-            exp.modified_date = datetime.utcnow()
+            exp.modified_date = _utcnow()
             self._save_to_disk()
         return sample
 

@@ -1,4 +1,18 @@
+# Dependencies
 frontend/node_modules/
 backend/venv/
+
+# Python bytecode
 __pycache__/
 *.pyc
+
+# Build output (regenerate with `npm run build`)
+frontend/dist/
+frontend/release/
+
+# Git worktrees created by tooling (each is a full repo checkout)
+.claude/worktrees/
+
+# Local runtime / cache
+.freecyto/
+*.log

@@ -1076,7 +1076,7 @@ export const App: React.FC = () => {
           `${API_BASE}/api/session/restore`,
         );
         if (!r.available || !r.workspace) return;
-        const ok = window.confirm("Restore your previous OpenCyto session from the server?");
+        const ok = window.confirm("Restore your previous FreeCyto session from the server?");
         if (!ok) return;
         await loadWorkspaceLatestRef.current(r.workspace);
       } catch {

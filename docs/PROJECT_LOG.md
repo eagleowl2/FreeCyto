@@ -1,6 +1,77 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑06‑17 (Phase X — In progress — App.tsx → Zustand: slice 1 (UI visibility) migrated)
+> Last updated: 2026‑08‑26 (Phase X slice 5 — compensation store; plus tech-debt sweep and CI)
+
+---
+
+## 2026‑08‑26 — Tech-debt sweep, CI, and documentation
+
+**Scope:** Audit for latent bugs and dead code, add continuous integration, and
+document the project invariants that were previously only tribal knowledge.
+
+Full detail — including the reasoning behind each invariant — is in
+**`docs/MAINTENANCE.md`**. Summary:
+
+**Latent bugs fixed**
+- **Packaged Electron builds would have produced a blank window.** The production
+  branch loaded `frontend/index.html` — the Vite *source* entry, which references
+  raw `/src/main.tsx`. Now loads `frontend/dist/index.html`, with `base: "./"` in
+  `vite.config.ts` so assets resolve over `file://`. CI asserts this.
+- **Dead, drifted Electron `.ts` duplicates removed.** `electron/main.ts` had zero
+  IPC handlers against six in the live `main.js`; wiring up a TS build would have
+  silently broken file-open, workspace save/load, and debug logging.
+- **`datetime.utcnow()` (18 sites)** — deprecated and scheduled for removal —
+  consolidated into `backend/timeutils.py`, deliberately preserving *naive*
+  semantics because layout/experiment JSON round-trips naive isoformat strings.
+  Test warnings: **201 → 1**.
+- **Redundant ~15 MB copy per density request** removed from
+  `storage.get_file_events_downsampled` (fancy indexing already copies).
+- **Uvicorn's reloader scoped to `backend/`** — it had been watching the whole
+  repo, including `node_modules`, `venv`, and five worktree copies, so frontend
+  edits restarted the backend.
+
+**Dependencies:** six declared-but-unimported packages (`pandas`, `scipy`,
+`scikit-learn`, `umap-learn`, `anndata`, `fcsparser`) commented out of
+`requirements.txt`; test-only deps split into `requirements-dev.txt`. Verified by
+running the full suite in a clean venv against the trimmed set.
+
+**Git hygiene:** untracked 11 committed-but-gitignored `.pyc` files and a stale
+`frontend/dist/` bundle from 2026‑04‑14; `.gitignore` rewritten.
+
+**CI:** `.github/workflows/ci.yml` — backend on Python 3.12 + 3.14, frontend
+typecheck/test/build plus a relative-asset-path guard protecting the packaging fix.
+
+**Baselines:** backend **348 passed / 1 skipped / 1 warning**; frontend **50/50**;
+`tsc --noEmit` clean; `vite build` clean.
+
+---
+
+## 2026‑08‑26 — Phase X: App.tsx → Zustand — Slice 5: Compensation
+
+**Scope:** Migrate the compensation / spillover matrix state out of `App.tsx` into
+`frontend/src/stores/compensationStore.ts`.
+
+**Migrated (8 fields):** `spillChNames`, `spillMatrix`, `compStatus`, `compError`,
+`compCond`, `isCompensated`, `spilloverData`, `spilloverLoading`. The
+`SpilloverData` type — previously a local alias inside `App.tsx` — is now exported
+from the store.
+
+Follows the established convention: setters mirror React's `useState` signature,
+so the change is a declaration-site substitution and every call site is untouched.
+`resetCompensationStore()` added to the global `afterEach` in `src/test/setup.ts`.
+
+**Verified live**, not just by unit test: loaded a 12-channel, 422k-event FCS
+fixture, confirmed the "not applied" badge, opened the matrix editor (12×12 grid
+populated from the store), and exercised Apply. The apply request itself hit a
+browser resource limit on that file size — an environment constraint, not a code
+defect — but `compStatus`/`compError` drove the UI correctly through the
+idle → applying → error transition.
+
+**Resolved an open question:** `spillChNames` / `spillMatrix` were flagged as
+possibly-dead leftovers from a pre-grid textarea editor. They are not — they are
+the live editor state backing the matrix UI. Migrated as-is.
+
+**Slices 6–8 remaining:** groups/templates, plates, files/channels.
 
 ---
 

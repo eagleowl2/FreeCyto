@@ -22,10 +22,13 @@ async function createWindow() {
   });
 
   if (isDev) {
-    // Vite dev server – keep in sync with vite.config.ts
+    // Vite dev server – keep in sync with vite.config.ts.
+    // Port is pinned: backend/main.py's CORS allowlist only admits :5173.
     await win.loadURL("http://localhost:5173/");
   } else {
-    await win.loadFile(path.join(__dirname, "..", "index.html"));
+    // Must be the *built* bundle. ../index.html is the Vite source entry, which
+    // references raw /src/main.tsx and cannot run in a packaged app.
+    await win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
 }
 

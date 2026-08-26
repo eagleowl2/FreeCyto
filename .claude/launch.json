@@ -1,18 +1,21 @@
 {
   "version": "0.0.1",
+  "comment": "Both ports are pinned deliberately. The backend CORS allowlist in backend/main.py only admits localhost:5173, and the frontend calls a hardcoded API_BASE on :8765 — so auto-porting either side breaks every request with a CORS error that surfaces as 'Failed to fetch'. If a port is occupied, free it rather than reassigning it.",
   "configurations": [
     {
       "name": "backend",
       "runtimeExecutable": "python",
       "runtimeArgs": ["backend/main.py"],
-      "port": 8765
+      "port": 8765,
+      "autoPort": false
     },
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite"],
       "port": 5173,
-      "cwd": "frontend"
+      "cwd": "frontend",
+      "autoPort": false
     }
   ]
 }

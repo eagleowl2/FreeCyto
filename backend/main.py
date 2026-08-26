@@ -44,7 +44,22 @@ async def health() -> dict:
 
 
 if __name__ == "__main__":
+    import pathlib
+
     import uvicorn
 
-    uvicorn.run("main:app", host="127.0.0.1", port=8765, reload=True)
+    # Watch only the backend package. Without an explicit reload_dirs, uvicorn's
+    # reloader walks the *current working directory* — which, when launched from
+    # the repo root, means frontend/node_modules, backend/venv, and every git
+    # worktree under .claude/worktrees (each a full repo copy with its own
+    # node_modules and multi-MB FCS fixtures). That made unrelated frontend edits
+    # restart the backend and left orphaned processes holding :8765.
+    uvicorn.run(
+        "main:app",
+        host="127.0.0.1",
+        port=8765,
+        reload=True,
+        reload_dirs=[str(pathlib.Path(__file__).parent)],
+        reload_excludes=["venv/*", "__pycache__/*", "*.pyc", "tests/fixtures/*"],
+    )
 

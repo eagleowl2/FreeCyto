@@ -1,0 +1,10 @@
+# FreeCyto backend — development and test dependencies.
+#   pip install -r requirements.txt -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest>=8.0.0
+
+# Required by fastapi.testclient / starlette.testclient, and used directly in
+# tests/test_phase_t.py.
+httpx>=0.27.0

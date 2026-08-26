@@ -11,6 +11,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from timeutils import utcnow as _utcnow
+
 
 # ─── Sample ───────────────────────────────────────────────────────────────────
 
@@ -31,8 +33,8 @@ class SampleRecord(BaseModel):
     load_status: str = "pending"        # pending | loaded | error
     compensation_applied: bool = False
     gate_count: int = 0
-    created_date: datetime = Field(default_factory=datetime.utcnow)
-    modified_date: datetime = Field(default_factory=datetime.utcnow)
+    created_date: datetime = Field(default_factory=_utcnow)
+    modified_date: datetime = Field(default_factory=_utcnow)
     meta: SampleMeta = Field(default_factory=SampleMeta)
 
 
@@ -73,7 +75,7 @@ class GroupRecord(BaseModel):
     name: str
     description: str = ""
     template_id: str | None = None      # default gating template for this group
-    created_date: datetime = Field(default_factory=datetime.utcnow)
+    created_date: datetime = Field(default_factory=_utcnow)
     samples: dict[str, SampleRecord] = Field(default_factory=dict)
 
 
@@ -115,8 +117,8 @@ class ExperimentRecord(BaseModel):
     name: str
     description: str = ""
     default_plate_format: str = "96"
-    created_date: datetime = Field(default_factory=datetime.utcnow)
-    modified_date: datetime = Field(default_factory=datetime.utcnow)
+    created_date: datetime = Field(default_factory=_utcnow)
+    modified_date: datetime = Field(default_factory=_utcnow)
     meta: ExperimentMeta = Field(default_factory=ExperimentMeta)
     groups: dict[str, GroupRecord] = Field(default_factory=dict)
 

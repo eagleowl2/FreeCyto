@@ -1,5 +1,7 @@
 # FreeCyto / OpenCyto Studio
 
+[![CI](https://github.com/eagleowl2/FreeCyto/actions/workflows/ci.yml/badge.svg)](https://github.com/eagleowl2/FreeCyto/actions/workflows/ci.yml)
+
 FreeCyto is an open-source, desktop flow cytometry analysis application inspired by FlowJo.  
 This repository contains a **fully-featured flow cytometry workstation** with a local Python backend (FastAPI) and
 an Electron + React frontend supporting:
@@ -311,9 +313,15 @@ See **`docs/PROJECT_LOG.md`** for the complete chronological log with all implem
 ## How to run the application
 
 ### Prerequisites
-- **Python 3.11+** with `venv` support
-- **Node.js 18+** and `npm`
-- **.NET runtime** (for FCS parsing optimization, optional)
+- **Python 3.12+** with `venv` support (CI covers 3.12 and 3.14)
+- **Node.js 20+** and `npm`
+
+> **Ports 8765 and 5173 are pinned — do not reassign them.** The backend's CORS
+> allowlist (`backend/main.py`) admits only `localhost:5173`, and the frontend calls
+> a hardcoded API base on `:8765`. If either service lands on a different port,
+> every API call fails CORS and surfaces in the UI as **"Failed to fetch"**. Vite is
+> configured with `strictPort: true` so a busy port fails loudly. Free the port
+> rather than reassigning it.
 
 ### Backend
 
@@ -327,8 +335,8 @@ python -m venv venv
 # On macOS/Linux:
 source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (add requirements-dev.txt to run the test suite)
+pip install -r requirements.txt -r requirements-dev.txt
 
 # Run the server
 python main.py
@@ -378,13 +386,39 @@ npm test -- --watch                # watch mode
 npm test -- src/test/interactions  # specific directory
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and PR to `main`:
+
+| Job | Steps |
+|-----|-------|
+| `backend` (Python 3.12 + 3.14) | `pip install -r requirements.txt -r requirements-dev.txt` → `pytest -q` |
+| `frontend` | `npm ci` → `tsc --noEmit` → `vitest run` → `vite build` → relative-asset-path check |
+
+The last frontend step guards a packaging invariant: Electron loads
+`dist/index.html` over `file://` in a packaged build, so an absolute
+`/assets/...` reference would 404 and yield a blank window. `vite.config.ts` sets
+`base: "./"` to keep asset paths relative, and CI fails if that regresses.
+
+Run the same checks locally before pushing:
+
+```bash
+cd backend && python -m pytest -q
+cd frontend && npx tsc --noEmit && npx vitest run && npx vite build
+```
+
 ### Production build (experimental)
 
 ```bash
 cd frontend
 npm run build           # creates dist/ folder
-npm run dist           # packages Electron app (requires electron-builder)
+npm run dist            # packages Electron app (requires electron-builder)
 ```
+
+`dist/` is generated output and is **not** committed — it is listed in
+`.gitignore`. In a packaged build Electron loads `frontend/dist/index.html`;
+`frontend/index.html` is the Vite *source* entry (it references raw
+`/src/main.tsx`) and must never be the production target.
 
 ---
 

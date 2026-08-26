@@ -30,7 +30,7 @@ least-coupled first.
 | 2 | `plotStore` | Plot/view settings: plotMode, density colormap + scale, bg theme, x/y transforms, backgate + contour toggles, zoom/pan (10 fields) | ✅ done |
 | 3 | `gateDrawStore` | Gate drawing/tool interaction: gateTool, drawMode, in-progress + pending shapes, drag preview, name error (10 fields) | ✅ done |
 | 4 | `gateDataStore` | Gate data: gateTree, activeGateId, gateMessage, gate stats, loading/error flags, stats + population sort columns (11 fields) | ✅ done |
-| 5 | compensation (spillover matrix, status) | — | planned |
+| 5 | `compensationStore` | Spillover matrix editor + apply lifecycle: spillChNames, spillMatrix, compStatus, compError, compCond, isCompensated, spilloverData, spilloverLoading (8 fields) | ✅ done |
 | 6 | groups / templates | — | planned |
 | 7 | plates | — | planned |
 | 8 | files / channels | — | planned |

@@ -291,7 +291,12 @@ def get_file_metadata_if_loaded(file_id: str) -> Optional[FileMetadata]:
 
 
 def get_file_events_downsampled(file_id: str, max_events: int) -> np.ndarray:
-  """Return up to max_events events for a file (randomly downsampled)."""
+  """Return up to max_events events for a file (randomly downsampled).
+
+  Always returns an in-memory array that does **not** alias the on-disk memmap,
+  so display-path callers cannot write through to the cache file (guarded by
+  ``test_backend_workflow`` — display fetches must never side-effect gate counts).
+  """
   events = get_file_events(file_id)
   n_events = events.shape[0]
   if n_events <= max_events:
@@ -299,6 +304,9 @@ def get_file_events_downsampled(file_id: str, max_events: int) -> np.ndarray:
 
   # Randomly choose a subset of rows without replacement; sort indices for sequential disk reads
   indices = np.sort(np.random.choice(n_events, size=max_events, replace=False))
-  return np.array(events[indices])
+  # Fancy indexing already materialises a fresh, owned array — wrapping it in
+  # np.array() would duplicate the whole downsample a second time (e.g. an extra
+  # 15 MB per density request on a 200k x 19 float32 sample).
+  return events[indices]
 
 

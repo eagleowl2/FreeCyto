@@ -22,6 +22,7 @@ from typing import List, Optional
 
 from models.gate_models import GateResponse
 from models.layout_models import GatingStep, LayoutMetadata, LayoutUpdateRequest
+from timeutils import utcnow as _utcnow
 
 logger = logging.getLogger("opencyto")
 
@@ -49,8 +50,8 @@ class Layout:
     compatible_channels: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     strategy: list[GatingStep] = field(default_factory=list)
-    created_date: datetime = field(default_factory=datetime.utcnow)
-    modified_date: datetime = field(default_factory=datetime.utcnow)
+    created_date: datetime = field(default_factory=_utcnow)
+    modified_date: datetime = field(default_factory=_utcnow)
 
     def to_metadata(self) -> LayoutMetadata:
         return LayoutMetadata(
@@ -131,8 +132,8 @@ def _layout_from_dict(d: dict) -> Layout:
         compatible_channels=d.get("compatible_channels", []),
         tags=d.get("tags", []),
         strategy=strategy,
-        created_date=datetime.fromisoformat(d["created_date"]) if "created_date" in d else datetime.utcnow(),
-        modified_date=datetime.fromisoformat(d["modified_date"]) if "modified_date" in d else datetime.utcnow(),
+        created_date=datetime.fromisoformat(d["created_date"]) if "created_date" in d else _utcnow(),
+        modified_date=datetime.fromisoformat(d["modified_date"]) if "modified_date" in d else _utcnow(),
     )
 
 
@@ -216,7 +217,7 @@ class LayoutStore:
                 layout.author = req.metadata.author
                 layout.compatible_channels = req.metadata.compatible_channels
                 layout.tags = req.metadata.tags
-            layout.modified_date = datetime.utcnow()
+            layout.modified_date = _utcnow()
             self._save_to_disk()
             return layout
 
@@ -226,7 +227,7 @@ class LayoutStore:
             if layout is None:
                 raise KeyError(f"Layout {layout_id!r} not found")
             layout.strategy = steps
-            layout.modified_date = datetime.utcnow()
+            layout.modified_date = _utcnow()
             self._save_to_disk()
             return layout
 

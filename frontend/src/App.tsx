@@ -26,6 +26,7 @@ import {
   type StatsSortCol,
   type PopulationSortCol,
 } from "./stores/gateDataStore";
+import { useCompensationStore, type SpilloverData } from "./stores/compensationStore";
 
 type HealthState =
   | { status: "idle" }
@@ -196,19 +197,22 @@ export const App: React.FC = () => {
     popSortDir, setPopSortDir,
   } = useGateDataStore();
 
+  // Phase X, slice 5: compensation / spillover matrix state → compensationStore.
+  const {
+    spillChNames, setSpillChNames,
+    spillMatrix, setSpillMatrix,
+    compStatus, setCompStatus,
+    compError, setCompError,
+    compCond, setCompCond,
+    isCompensated, setIsCompensated,
+    spilloverData, setSpilloverData,
+    spilloverLoading, setSpilloverLoading,
+  } = useCompensationStore();
+
   const [health, setHealth] = React.useState<HealthState>({ status: "idle" });
 
   const [fcsPath, setFcsPath] = React.useState("");
   const [loadedFiles, setLoadedFiles] = React.useState<LoadedFile[]>([]);
-  /** J-2: spillover table editor state — channel names (row/col headers) + matrix cells (strings for editing). */
-  const [spillChNames, setSpillChNames] = React.useState<string[]>([]);
-  const [spillMatrix, setSpillMatrix] = React.useState<string[][]>([]);
-  const [compStatus, setCompStatus] = React.useState<"idle" | "applying" | "error" | "success">("idle");
-  const [compError, setCompError] = React.useState<string | null>(null);
-  /** Condition number of the most recently applied spillover matrix (null = raw / unknown). */
-  const [compCond, setCompCond] = React.useState<number | null>(null);
-  /** Whether the backend currently has compensation applied for the active file. */
-  const [isCompensated, setIsCompensated] = React.useState(false);
   const [file, setFile] = React.useState<LoadedFile | null>(null);
   const [channels, setChannels] = React.useState<ChannelInfo[]>([]);
   const [xChannel, setXChannel] = React.useState("");
@@ -250,10 +254,7 @@ export const App: React.FC = () => {
   const [saveLayoutLoading, setSaveLayoutLoading] = React.useState(false);
   const [loadLayoutLoading, setLoadLayoutLoading] = React.useState(false);
 
-  // Q-4: Compensation matrix UI
-  type SpilloverData = { file_id: string; channel_names: string[]; matrix: number[][]; cond: number };
-  const [spilloverData, setSpilloverData] = React.useState<SpilloverData | null>(null);
-  const [spilloverLoading, setSpilloverLoading] = React.useState(false);
+  // Q-4: Compensation matrix UI — spilloverData / spilloverLoading → compensationStore (Phase X)
   // compensationModalOpen, compensationFullMatrixOpen → uiStore (Phase X)
   // C-4: derive from gateList so flattenTree is called only once per gateTree change.
   const visibleGates = React.useMemo(

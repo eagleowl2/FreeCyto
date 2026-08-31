@@ -27,6 +27,7 @@ import {
   type PopulationSortCol,
 } from "./stores/gateDataStore";
 import { useCompensationStore, type SpilloverData } from "./stores/compensationStore";
+import { useGroupsStore, type BatchStatRow } from "./stores/groupsStore";
 
 type HealthState =
   | { status: "idle" }
@@ -289,23 +290,25 @@ export const App: React.FC = () => {
 
   // T: Experiment hierarchy + Table panel — visibility flags moved to uiStore (Phase X).
 
-  // K: sample groups, gating templates, batch statistics
-  type SampleInfo = { file_id: string; label: string };
-  type GroupInfo = { id: string; name: string; samples: SampleInfo[]; template_id: string | null };
-  type BatchStatRow = { file_id: string; label: string; gate_name: string; count: number; pct_of_parent: number; pct_of_total: number; parent_count: number };
-  const [groups, setGroups] = React.useState<GroupInfo[]>([]);
-  // groupPanelOpen → uiStore (Phase X)
-  const [newGroupName, setNewGroupName] = React.useState("");
-  const [newGroupFileIds, setNewGroupFileIds] = React.useState<string[]>([]);
-  const [groupError, setGroupError] = React.useState<string | null>(null);
-  const [expandedGroupId, setExpandedGroupId] = React.useState<string | null>(null);
-  const [batchGateName, setBatchGateName] = React.useState("");
-  const [batchStats, setBatchStats] = React.useState<{ groupId: string; rows: BatchStatRow[] } | null>(null);
-  const [batchStatsLoading, setBatchStatsLoading] = React.useState(false);
-  const [tplSourceFileId, setTplSourceFileId] = React.useState("");
-  const [tplName, setTplName] = React.useState("");
-  const [tplStatus, setTplStatus] = React.useState<"idle" | "working" | "done" | "error">("idle");
-  const [tplError, setTplError] = React.useState<string | null>(null);
+  // K: sample groups, gating templates, batch statistics → groupsStore (Phase X).
+  // groupPanelOpen → uiStore (Phase X).
+  // The fetch functions (fetchGroups / createGroup / deleteGroup) stay in this
+  // file — the store owns the state, not the I/O — so setters keep the React
+  // useState signature and every call site below is unchanged.
+  const {
+    groups, setGroups,
+    newGroupName, setNewGroupName,
+    newGroupFileIds, setNewGroupFileIds,
+    groupError, setGroupError,
+    expandedGroupId, setExpandedGroupId,
+    batchGateName, setBatchGateName,
+    batchStats, setBatchStats,
+    batchStatsLoading, setBatchStatsLoading,
+    tplSourceFileId, setTplSourceFileId,
+    tplName, setTplName,
+    tplStatus, setTplStatus,
+    tplError, setTplError,
+  } = useGroupsStore();
 
   // L: Boolean gates
   const [boolGateName, setBoolGateName] = React.useState("");

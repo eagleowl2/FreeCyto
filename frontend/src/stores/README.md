@@ -31,7 +31,7 @@ least-coupled first.
 | 3 | `gateDrawStore` | Gate drawing/tool interaction: gateTool, drawMode, in-progress + pending shapes, drag preview, name error (10 fields) | ✅ done |
 | 4 | `gateDataStore` | Gate data: gateTree, activeGateId, gateMessage, gate stats, loading/error flags, stats + population sort columns (11 fields) | ✅ done |
 | 5 | `compensationStore` | Spillover matrix editor + apply lifecycle: spillChNames, spillMatrix, compStatus, compError, compCond, isCompensated, spilloverData, spilloverLoading (8 fields) | ✅ done |
-| 6 | groups / templates | — | planned |
+| 6 | `groupsStore` | Sample groups, gating templates, batch stats: groups list, new-group form, expanded group, batch gate name + rows + loading, template source/name/status/error (12 fields) | ✅ done |
 | 7 | plates | — | planned |
 | 8 | files / channels | — | planned |
 

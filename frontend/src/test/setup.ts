@@ -7,6 +7,7 @@ import { resetPlotStore } from "../stores/plotStore";
 import { resetGateDrawStore } from "../stores/gateDrawStore";
 import { resetGateDataStore } from "../stores/gateDataStore";
 import { resetCompensationStore } from "../stores/compensationStore";
+import { resetGroupsStore } from "../stores/groupsStore";
 
 // MSW
 beforeAll(() => server.listen({ onUnhandledRequest: "warn" }));
@@ -31,6 +32,7 @@ afterEach(() => {
   resetGateDrawStore();
   resetGateDataStore();
   resetCompensationStore();
+  resetGroupsStore();
 });
 
 // ResizeObserver

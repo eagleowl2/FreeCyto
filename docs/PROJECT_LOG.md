@@ -1,6 +1,55 @@
 # Project Log – FreeCyto / OpenCyto Studio
 
-> Last updated: 2026‑08‑26 (Phase X slice 5 — compensation store; plus tech-debt sweep and CI)
+> Last updated: 2026‑08‑26 (Phase X **complete** — slices 6–8; App.tsx down to 31 useState hooks)
+
+---
+
+## 2026‑08‑26 — Phase X complete: slices 6–8 (groups, plates, files)
+
+**Scope:** Finish the `App.tsx` → Zustand migration begun in slice 1.
+
+| Slice | Store | Fields |
+|-------|-------|--------|
+| 6 | `groupsStore` | Sample groups, gating templates, batch statistics (12) |
+| 7 | `plateStore` | Plate layouts, heat-map stats, create form, well-assign mode (9) |
+| 8 | `fileStore` | Loaded files, active file, channels, x/y axis selection, load status (9) |
+
+**Outcome: `App.tsx` went from 109 `useState` hooks to 31** across the whole of
+Phase X. What remains is plot data (points, density, histogram), refs, and small
+local UI state that no other component needs.
+
+Line count is essentially unchanged (~6,941 → ~6,987). That is expected and not a
+failure: the goal was decoupling state ownership so panels can subscribe to just
+what they need, not shrinking the file. The destructuring blocks and their
+explanatory comments cost roughly what the removed declarations saved.
+
+**Types moved with their state**, so each store owns its own domain vocabulary:
+`SampleInfo`/`GroupInfo`/`BatchStatRow` (6), `PlateInfo`/`PlateWellInfo`/
+`PlateStatWell`/`PlateStatsData` (7), `LoadedFile`/`ChannelInfo`/`FileInfo` (8).
+
+The slice-8 types are worth noting: `LoadedFile` and `ChannelInfo` were
+*module-level* declarations in `App.tsx`, not component-local like the others.
+They now live in the store because the dependency has to point one way — `App.tsx`
+imports the store, so the store importing back would be a cycle.
+
+**Scope boundary held throughout:** the state/I-O line from slice 4. Fetch and
+mutation functions stay in `App.tsx` and call the stores' setters. Moving request
+logic into stores would be a real behaviour change (lifecycle, cancellation,
+dedup) and was deliberately excluded from a migration.
+
+**Verified in the running app**, not only by unit test:
+- slice 6 — created a sample group with a selected sample, confirmed it listed,
+  the name input cleared, and expansion drove the template and batch sections
+- slice 7 — created a 24-well plate and confirmed the grid rendered 4 rows x 6
+  columns, matching the selected format, with the assign hint correctly reading
+  the active file from `fileStore`
+- slice 8 — loaded a 422,888-event, 19-channel FCS file and confirmed the file,
+  channel list, axis selections and scatter plot all populated through the store
+
+No console errors. Records created during verification were deleted afterwards —
+the dev backend writes to the real `~/.freecyto/*.json`, not a temp dir.
+
+**Baselines:** frontend **50/50**, `tsc --noEmit` clean. Backend untouched.
 
 ---
 

@@ -27,6 +27,19 @@ import {
   type PopulationSortCol,
 } from "./stores/gateDataStore";
 import { useCompensationStore, type SpilloverData } from "./stores/compensationStore";
+import { useGroupsStore, type BatchStatRow } from "./stores/groupsStore";
+import {
+  usePlateStore,
+  type PlateInfo,
+  type PlateStatWell,
+  type PlateStatsData,
+} from "./stores/plateStore";
+import {
+  useFileStore,
+  type LoadedFile,
+  type ChannelInfo,
+  type FileInfo,
+} from "./stores/fileStore";
 
 type HealthState =
   | { status: "idle" }
@@ -34,14 +47,7 @@ type HealthState =
   | { status: "ok" }
   | { status: "error"; message: string };
 
-type LoadedFile = {
-  id: string;
-  path: string;
-  sample_name?: string | null;
-  event_count: number;
-  channels: string[];
-  spillover?: number[][] | null;
-};
+// LoadedFile / ChannelInfo / FileInfo → fileStore (Phase X); imported above.
 
 type ScatterPoint = { x: number; y: number };
 
@@ -70,15 +76,6 @@ type DragState = {
 
 const API_BASE = "http://127.0.0.1:8765";
 // DEFAULT_X_TRANSFORM / DEFAULT_Y_TRANSFORM / VALID_DENSITY_COLORMAPS → plotStore (Phase X)
-
-type ChannelInfo = {
-  name: string;
-  index: number;
-  stain: string | null;
-  display_name: string;
-  ui_label: string;
-  range: number | null;
-};
 
 type DensityData = {
   binsX: number;
@@ -211,12 +208,20 @@ export const App: React.FC = () => {
 
   const [health, setHealth] = React.useState<HealthState>({ status: "idle" });
 
-  const [fcsPath, setFcsPath] = React.useState("");
-  const [loadedFiles, setLoadedFiles] = React.useState<LoadedFile[]>([]);
-  const [file, setFile] = React.useState<LoadedFile | null>(null);
-  const [channels, setChannels] = React.useState<ChannelInfo[]>([]);
-  const [xChannel, setXChannel] = React.useState("");
-  const [yChannel, setYChannel] = React.useState("");
+  // Phase X, slice 8: loaded files + channel selection → fileStore.
+  // handleLoadFcs and the /api/files/* calls stay in this file — the store owns
+  // the state, not the I/O — so every call site below is unchanged.
+  const {
+    fcsPath, setFcsPath,
+    loadedFiles, setLoadedFiles,
+    file, setFile,
+    channels, setChannels,
+    xChannel, setXChannel,
+    yChannel, setYChannel,
+    allFiles, setAllFiles,
+    fcsStatus, setFcsStatus,
+    fcsError, setFcsError,
+  } = useFileStore();
   // plotMode / densityColormap / densityDisplayScale / plotBgMode / transformX /
   // transformY / showBackgate → plotStore (Phase X)
   const [points, setPoints] = React.useState<ScatterPoint[]>([]);
@@ -235,9 +240,7 @@ export const App: React.FC = () => {
   // statsExpanded → uiStore (Phase X)
   const gateList = React.useMemo(() => flattenTree(gateTree), [gateTree]);
 
-  // Q-1: Batch gate copy
-  type FileInfo = { id: string; sample_name: string; event_count: number };
-  const [allFiles, setAllFiles] = React.useState<FileInfo[]>([]);
+  // Q-1: Batch gate copy — allFiles + FileInfo → fileStore (Phase X)
   // applyGatesModalOpen → uiStore (Phase X)
   const [applyGatesTargets, setApplyGatesTargets] = React.useState<Set<string>>(new Set());
   const [applyGatesLoading, setApplyGatesLoading] = React.useState(false);
@@ -269,10 +272,7 @@ export const App: React.FC = () => {
   );
   // gateNameError / drawingRect / pendingGate / gateTool / pendingEllipse (N) /
   // drawMode / drawingPolygon → gateDrawStore (Phase X)
-  const [fcsStatus, setFcsStatus] = React.useState<
-    "idle" | "loading" | "loaded" | "error"
-  >("idle");
-  const [fcsError, setFcsError] = React.useState<string | null>(null);
+  // fcsStatus / fcsError → fileStore (Phase X)
   const [debugLogPath, setDebugLogPath] = React.useState<string>("");
   const [debugUiStatus, setDebugUiStatus] = React.useState<string>("");
   const [debugLastRuntimeError, setDebugLastRuntimeError] = React.useState<string>("");
@@ -289,23 +289,25 @@ export const App: React.FC = () => {
 
   // T: Experiment hierarchy + Table panel — visibility flags moved to uiStore (Phase X).
 
-  // K: sample groups, gating templates, batch statistics
-  type SampleInfo = { file_id: string; label: string };
-  type GroupInfo = { id: string; name: string; samples: SampleInfo[]; template_id: string | null };
-  type BatchStatRow = { file_id: string; label: string; gate_name: string; count: number; pct_of_parent: number; pct_of_total: number; parent_count: number };
-  const [groups, setGroups] = React.useState<GroupInfo[]>([]);
-  // groupPanelOpen → uiStore (Phase X)
-  const [newGroupName, setNewGroupName] = React.useState("");
-  const [newGroupFileIds, setNewGroupFileIds] = React.useState<string[]>([]);
-  const [groupError, setGroupError] = React.useState<string | null>(null);
-  const [expandedGroupId, setExpandedGroupId] = React.useState<string | null>(null);
-  const [batchGateName, setBatchGateName] = React.useState("");
-  const [batchStats, setBatchStats] = React.useState<{ groupId: string; rows: BatchStatRow[] } | null>(null);
-  const [batchStatsLoading, setBatchStatsLoading] = React.useState(false);
-  const [tplSourceFileId, setTplSourceFileId] = React.useState("");
-  const [tplName, setTplName] = React.useState("");
-  const [tplStatus, setTplStatus] = React.useState<"idle" | "working" | "done" | "error">("idle");
-  const [tplError, setTplError] = React.useState<string | null>(null);
+  // K: sample groups, gating templates, batch statistics → groupsStore (Phase X).
+  // groupPanelOpen → uiStore (Phase X).
+  // The fetch functions (fetchGroups / createGroup / deleteGroup) stay in this
+  // file — the store owns the state, not the I/O — so setters keep the React
+  // useState signature and every call site below is unchanged.
+  const {
+    groups, setGroups,
+    newGroupName, setNewGroupName,
+    newGroupFileIds, setNewGroupFileIds,
+    groupError, setGroupError,
+    expandedGroupId, setExpandedGroupId,
+    batchGateName, setBatchGateName,
+    batchStats, setBatchStats,
+    batchStatsLoading, setBatchStatsLoading,
+    tplSourceFileId, setTplSourceFileId,
+    tplName, setTplName,
+    tplStatus, setTplStatus,
+    tplError, setTplError,
+  } = useGroupsStore();
 
   // L: Boolean gates
   const [boolGateName, setBoolGateName] = React.useState("");
@@ -329,22 +331,21 @@ export const App: React.FC = () => {
 
   // O: density contour lines toggle → plotStore (Phase X)
 
-  // P-1: Plate layout panel
-  type PlateWellInfo = { well_id: string; row: number; col: number; file_id: string | null; label: string | null };
-  type PlateInfo = { id: string; name: string; rows: number; cols: number; wells: PlateWellInfo[] };
-  type PlateStatWell = { well_id: string; file_id: string | null; label: string | null; row: number; col: number; count: number; pct_of_parent: number; pct_of_total: number; total_events: number };
-  type PlateStatsData = { plate_id: string; plate_name: string; gate_name: string; rows: number; cols: number; wells: PlateStatWell[] };
-  const [plates, setPlates] = React.useState<PlateInfo[]>([]);
-  // platePanelOpen → uiStore (Phase X)
-  const [activePlateId, setActivePlateId] = React.useState<string | null>(null);
-  const [plateGateName, setPlateGateName] = React.useState("");
-  const [plateStats, setPlateStats] = React.useState<PlateStatsData | null>(null);
-  const [plateStatsLoading, setPlateStatsLoading] = React.useState(false);
-  const [plateCreateName, setPlateCreateName] = React.useState("");
-  const [plateCreateFormat, setPlateCreateFormat] = React.useState("96");
-  // plateCreateOpen → uiStore (Phase X)
-  const [plateAssignMode, setPlateAssignMode] = React.useState(false);
-  const [plateAssignWellId, setPlateAssignWellId] = React.useState<string | null>(null);
+  // P-1: Plate layout panel → plateStore (Phase X).
+  // platePanelOpen / plateCreateOpen → uiStore (Phase X).
+  // The /api/plates fetch and mutation calls stay in this file — the store owns
+  // the state, not the I/O — so every call site below is unchanged.
+  const {
+    plates, setPlates,
+    activePlateId, setActivePlateId,
+    plateGateName, setPlateGateName,
+    plateStats, setPlateStats,
+    plateStatsLoading, setPlateStatsLoading,
+    plateCreateName, setPlateCreateName,
+    plateCreateFormat, setPlateCreateFormat,
+    plateAssignMode, setPlateAssignMode,
+    plateAssignWellId, setPlateAssignWellId,
+  } = usePlateStore();
 
   // P-2: plot zoom/pan
   // zoom / isPanning → plotStore (Phase X); ZoomState type is imported from there.

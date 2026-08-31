@@ -31,9 +31,22 @@ least-coupled first.
 | 3 | `gateDrawStore` | Gate drawing/tool interaction: gateTool, drawMode, in-progress + pending shapes, drag preview, name error (10 fields) | ✅ done |
 | 4 | `gateDataStore` | Gate data: gateTree, activeGateId, gateMessage, gate stats, loading/error flags, stats + population sort columns (11 fields) | ✅ done |
 | 5 | `compensationStore` | Spillover matrix editor + apply lifecycle: spillChNames, spillMatrix, compStatus, compError, compCond, isCompensated, spilloverData, spilloverLoading (8 fields) | ✅ done |
-| 6 | groups / templates | — | planned |
-| 7 | plates | — | planned |
-| 8 | files / channels | — | planned |
+| 6 | `groupsStore` | Sample groups, gating templates, batch stats: groups list, new-group form, expanded group, batch gate name + rows + loading, template source/name/status/error (12 fields) | ✅ done |
+| 7 | `plateStore` | Plate layout panel: plates, activePlateId, gate name + heat-map stats + loading, create-plate form, well-assignment mode (9 fields) | ✅ done |
+| 8 | `fileStore` | Loaded files + channel selection: fcsPath, loadedFiles, file, channels, x/yChannel, allFiles, fcsStatus, fcsError (9 fields) | ✅ done |
+
+**Phase X is complete.** `App.tsx` went from **109 `useState` hooks to 31** — the
+remainder is plot data (points, density, histogram), refs, and small local UI
+state that no other component needs. Line count is roughly unchanged (~6.94k →
+~6.99k): the point was decoupling state ownership, not shrinking the file, and the
+destructuring blocks plus their comments cost about as much as the removed
+declarations.
+
+Types moved with their state: `SpilloverData` (5), `SampleInfo`/`GroupInfo`/
+`BatchStatRow` (6), `PlateInfo`/`PlateWellInfo`/`PlateStatWell`/`PlateStatsData`
+(7), and `LoadedFile`/`ChannelInfo`/`FileInfo` (8). The slice-8 types were
+module-level in `App.tsx`; they live in the store because the dependency must
+point one way — `App.tsx` imports the store, so the store cannot import back.
 
 The gate domain was deliberately split across slices 3 and 4: the drawing half is
 transient pointer/keyboard state with no I/O, while the data half is driven by

@@ -171,7 +171,7 @@ export const App: React.FC = () => {
   };
   const [gateStats, setGateStats] = React.useState<GateStatsData | null>(null);
   const [gateStatsLoading, setGateStatsLoading] = React.useState(false);
-  const [statsExpanded, setStatsExpanded] = React.useState(false);
+  const [statsExpanded, setStatsExpanded] = React.useState(true);
   // P-3: column sort for stats table
   type StatsSortCol = "channel" | "mean" | "median" | "sd" | "cv";
   const [statsSortCol, setStatsSortCol] = React.useState<StatsSortCol>("channel");
@@ -190,7 +190,7 @@ export const App: React.FC = () => {
   type PopulationSortCol = "name" | "count" | "pct_parent" | "pct_total";
   const [popSortCol, setPopSortCol] = React.useState<PopulationSortCol>("name");
   const [popSortDir, setPopSortDir] = React.useState<"asc" | "desc">("asc");
-  const [popExpanded, setPopExpanded] = React.useState(false);
+  const [popExpanded, setPopExpanded] = React.useState(true);
 
   // Q-3: Gate layout save/restore
   type LayoutInfo = { id: string; name: string; gate_count: number; source_file_id: string };
@@ -262,6 +262,7 @@ export const App: React.FC = () => {
   const [experimentPanelOpen, setExperimentPanelOpen] = React.useState(false);
   const [tablePanelOpen, setTablePanelOpen] = React.useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = React.useState(false);
+  const [sidebarOpen, setSidebarOpen] = React.useState(true);
 
   // K: sample groups, gating templates, batch statistics
   type SampleInfo = { file_id: string; label: string };
@@ -1413,7 +1414,7 @@ export const App: React.FC = () => {
     const ro = new ResizeObserver((entries) => {
       const { width } = entries[0]?.contentRect ?? { width: 480 };
       if (width > 0) {
-        const w = Math.max(420, Math.min(Math.round(width), 560));
+        const w = Math.max(300, Math.round(width));
         setPlotSize({ w, h: w });
       }
     });
@@ -1557,555 +1558,254 @@ export const App: React.FC = () => {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        height: "100vh",
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "flex-start",
+        overflow: "hidden",
         fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        background:
-          "radial-gradient(circle at top, #0f172a 0, #020617 45%, #020617 100%)",
+        background: "#020617",
         color: "white",
-        padding: "clamp(1rem, 3vw, 2.5rem)",
-        boxSizing: "border-box",
       }}
     >
-      {/* Top toolbar — FreeCyto-style editor buttons */}
-      <div
+      {/* ── App Header ── */}
+      <header
         style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 100,
           display: "flex",
-          gap: "0.75rem",
-          padding: "0.75rem 1rem",
-          borderRadius: 0,
-          background: "rgba(15,23,42,0.95)",
-          border: "none",
-          borderBottom: "1px solid rgba(148,163,184,0.3)",
-          width: "100%",
-          maxWidth: "none",
-          flexWrap: "wrap",
-          marginLeft: "calc(-1 * clamp(1rem, 3vw, 2.5rem))",
-          marginRight: "calc(-1 * clamp(1rem, 3vw, 2.5rem))",
-          paddingLeft: "clamp(1rem, 3vw, 2.5rem)",
-          paddingRight: "clamp(1rem, 3vw, 2.5rem)",
-          marginBottom: "1.5rem",
+          alignItems: "center",
+          gap: "0.5rem",
+          height: "42px",
+          flexShrink: 0,
+          padding: "0 0.75rem",
+          background: "rgba(15,23,42,0.98)",
+          borderBottom: "1px solid rgba(148,163,184,0.18)",
+          zIndex: 100,
         }}
       >
+        {/* Sidebar toggle */}
         <button
           type="button"
-          onClick={() => setTablePanelOpen(true)}
+          title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+          onClick={() => setSidebarOpen((o) => !o)}
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "0.5rem",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.5rem",
-            border: "1px solid rgba(148,163,184,0.4)",
-            background: tablePanelOpen ? "rgba(251,191,36,0.2)" : "transparent",
-            color: "#fbbf24",
-            fontSize: "0.9rem",
-            fontWeight: 500,
+            justifyContent: "center",
+            width: 28,
+            height: 28,
+            borderRadius: "0.35rem",
+            border: "1px solid rgba(148,163,184,0.25)",
+            background: "transparent",
+            color: "#64748b",
+            fontSize: "0.8rem",
             cursor: "pointer",
-            transition: "all 0.2s",
+            flexShrink: 0,
           }}
         >
-          <span>📊</span>
-          <span>Table Editor</span>
+          {sidebarOpen ? "◀" : "▶"}
         </button>
 
-        <button
-          type="button"
-          onClick={() => setLayoutEditorOpen(true)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.5rem",
-            border: "1px solid rgba(148,163,184,0.4)",
-            background: layoutEditorOpen ? "rgba(167,139,250,0.2)" : "transparent",
-            color: "#a78bfa",
-            fontSize: "0.9rem",
-            fontWeight: 500,
-            cursor: "pointer",
-            transition: "all 0.2s",
-          }}
-        >
-          <span>🗂</span>
-          <span>Layout Editor</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setPlatePanelOpen(true)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.5rem",
-            border: "1px solid rgba(148,163,184,0.4)",
-            background: platePanelOpen ? "rgba(96,165,250,0.2)" : "transparent",
-            color: "#60a5fa",
-            fontSize: "0.9rem",
-            fontWeight: 500,
-            cursor: "pointer",
-            transition: "all 0.2s",
-          }}
-        >
-          <span>📋</span>
-          <span>Plate Editor</span>
-        </button>
-      </div>
-
-          <div
+        {/* Logo */}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginRight: "0.75rem" }}>
+          <span style={{ fontWeight: 700, fontSize: "1rem", letterSpacing: "0.03em", color: "#e2e8f0" }}>
+            Free<span style={{ color: "#a78bfa" }}>Cyto</span>
+          </span>
+          <span
+            title={health.status === "ok" ? "Backend connected" : health.status === "error" ? "Backend error" : "Backend status unknown"}
             style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(240px, 280px) minmax(0, 1fr)",
-              gap: "clamp(0.75rem, 2vw, 2rem)",
-              alignItems: "start",
-              width: "100%",
-              maxWidth: "min(1320px, 100%)",
-              margin: "0 auto",
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: health.status === "ok" ? "#4ade80" : health.status === "error" ? "#f87171" : "#64748b",
+              flexShrink: 0,
+              display: "inline-block",
+            }}
+          />
+        </div>
+
+        {/* Tab buttons */}
+        <div style={{ display: "flex", gap: "0.25rem" }}>
+          {([
+            { label: "Table Editor", icon: "📊", color: "#fbbf24", hoverBg: "rgba(251,191,36,0.15)", active: tablePanelOpen, onClick: () => setTablePanelOpen(true) },
+            { label: "Layout Editor", icon: "🗂", color: "#a78bfa", hoverBg: "rgba(167,139,250,0.15)", active: layoutEditorOpen, onClick: () => setLayoutEditorOpen(true) },
+            { label: "Plate Editor", icon: "📋", color: "#60a5fa", hoverBg: "rgba(96,165,250,0.15)", active: platePanelOpen, onClick: () => setPlatePanelOpen((o) => !o) },
+          ] as const).map(({ label, icon, color, hoverBg, active, onClick }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={onClick}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                padding: "0.25rem 0.65rem",
+                borderRadius: "0.4rem",
+                border: active ? `1px solid ${color}55` : "1px solid transparent",
+                background: active ? hoverBg : "transparent",
+                color: active ? color : "#94a3b8",
+                fontSize: "0.82rem",
+                fontWeight: 500,
+                cursor: "pointer",
+                transition: "all 0.15s",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{ fontSize: "0.85rem" }}>{icon}</span>
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Workspace actions */}
+        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+          {file && (
+            <span style={{ fontSize: "0.75rem", color: "#475569", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {file.sample_name || file.path.split(/[/\\]/).pop()}
+            </span>
+          )}
+          <button
+            type="button"
+            title="Save workspace"
+            onClick={async () => {
+              try {
+                const res = await fetch(`${API_BASE}/api/workspace/save`, { method: "POST" });
+                if (!res.ok) throw new Error(await res.text());
+                type WsFile = { path: string; id?: string | null; n_channels?: number | null };
+                type WorkspaceSavePayload = { version?: number; files: WsFile[]; compensation: unknown; gates: unknown[]; default_axes?: Record<string, { x_channel: string; y_channel: string; transform_x: string; transform_y: string }> };
+                const ws = (await res.json()) as WorkspaceSavePayload;
+                const mergedAxes: NonNullable<WorkspaceSavePayload["default_axes"]> = { ...(ws.default_axes ?? {}) };
+                for (const entry of ws.files) {
+                  const fid = entry.id;
+                  if (!fid) continue;
+                  if (file?.id === fid && xChannel && yChannel) {
+                    mergedAxes[fid] = { x_channel: xChannel, y_channel: yChannel, transform_x: transformX, transform_y: transformY };
+                  } else {
+                    const saved = perFileAxesRef.current.get(fid);
+                    if (saved?.x && saved.y) mergedAxes[fid] = { x_channel: saved.x, y_channel: saved.y, transform_x: saved.tx, transform_y: saved.ty };
+                  }
+                }
+                const wsOut = { ...ws, default_axes: mergedAxes };
+                const wsStr = JSON.stringify(wsOut, null, 2);
+                fetch(`${API_BASE}/api/session/save`, { method: "POST", headers: { "Content-Type": "application/json" }, body: wsStr }).catch(() => {});
+                const result = (await window.opencyto?.saveWorkspaceFile?.(wsStr)) ?? { canceled: true };
+                if (!result.canceled) setFcsError(null);
+              } catch (err) { setFcsError(err instanceof Error ? err.message : String(err)); }
+            }}
+            style={{
+              padding: "0.2rem 0.55rem",
+              borderRadius: "0.35rem",
+              border: "1px solid rgba(148,163,184,0.3)",
+              background: "transparent",
+              color: "#64748b",
+              fontSize: "0.75rem",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
             }}
           >
-        <div
+            Save
+          </button>
+          <button
+            type="button"
+            title="Load workspace"
+            onClick={async () => {
+              try {
+                const result = (await window.opencyto?.loadWorkspaceFile?.()) ?? { canceled: true };
+                if (result.canceled || !result.content) return;
+                const body = JSON.parse(result.content) as unknown;
+                await loadWorkspaceFromParsedBody(body);
+              } catch (err) { setFcsError(err instanceof Error ? err.message : String(err)); }
+            }}
+            style={{
+              padding: "0.2rem 0.55rem",
+              borderRadius: "0.35rem",
+              border: "1px solid rgba(148,163,184,0.3)",
+              background: "transparent",
+              color: "#64748b",
+              fontSize: "0.75rem",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Load
+          </button>
+        </div>
+      </header>
+
+      {/* ── Main body: left sidebar + center + right inspector ── */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
+
+        {/* ── LEFT SIDEBAR ── */}
+        <aside
           style={{
+            width: sidebarOpen ? 210 : 0,
+            flexShrink: 0,
+            overflow: "hidden",
+            transition: "width 0.2s ease",
+            background: "rgba(15,23,42,0.97)",
+            borderRight: "1px solid rgba(148,163,184,0.12)",
             display: "flex",
             flexDirection: "column",
-            gap: "1.25rem",
-            minWidth: 0,
           }}
         >
-        <div
-          style={{
-            padding: "1.75rem 1.75rem",
-            borderRadius: "1.25rem",
-            background:
-              "linear-gradient(145deg, rgba(15,23,42,0.95), rgba(15,23,42,0.85))",
-            boxShadow:
-              "0 20px 50px rgba(15,23,42,0.9), 0 0 0 1px rgba(148,163,184,0.3)",
-          }}
-        >
-          <h1
-            style={{
-              fontSize: "1.6rem",
-              marginBottom: "0.5rem",
-              fontWeight: 600,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-              color: "#e5e7eb",
-            }}
-          >
-            FreeCyto Studio
-          </h1>
-          <p
-            style={{
-              marginBottom: "1.25rem",
-              color: "#9ca3af",
-              fontSize: "0.95rem",
-            }}
-          >
-            Local backend status (FastAPI at{" "}
-            <code style={{ fontFamily: "monospace", color: "#c4b5fd" }}>
-              127.0.0.1:8765
-            </code>
-            ).
-          </p>
-
           <div
             style={{
+              width: 210,
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "1rem",
+              flexDirection: "column",
+              flex: 1,
+              overflow: "hidden",
             }}
           >
-            <div>
+            {/* File loader */}
+            <div style={{ padding: "0.6rem 0.65rem 0.4rem", borderBottom: "1px solid rgba(148,163,184,0.1)" }}>
               <div
                 style={{
-                  fontSize: "0.8rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: "#9ca3af",
-                  marginBottom: "0.35rem",
+                  position: "relative",
+                  display: "flex",
+                  gap: "0.3rem",
+                  alignItems: "center",
                 }}
               >
-                Backend Health
-              </div>
-              <div style={{ fontSize: "1.05rem", fontWeight: 500 }}>
-                {health.status === "idle" && "Not checked yet"}
-                {health.status === "loading" && "Checking..."}
-                {health.status === "ok" && (
-                  <span style={{ color: "#4ade80" }}>Connected</span>
-                )}
-                {health.status === "error" && (
-                  <span style={{ color: "#f97373" }}>Error</span>
-                )}
-              </div>
-              {health.status === "error" && (
-                <div
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const paths = (await window.opencyto?.openFcsFiles?.()) ?? [];
+                      if (!paths || paths.length === 0) return;
+                      setFcsPath(paths[0]);
+                      await handleLoadFcs(paths[0]);
+                    } catch (err) {
+                      setFcsError(err instanceof Error ? err.message : String(err));
+                    }
+                  }}
+                  disabled={fcsStatus === "loading"}
                   style={{
-                    marginTop: "0.35rem",
-                    fontSize: "0.8rem",
-                    color: "#fca5a5",
-                    maxWidth: "18rem",
+                    flex: 1,
+                    padding: "0.35rem 0.6rem",
+                    borderRadius: "0.45rem",
+                    border: "none",
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    background: "linear-gradient(135deg, #22c55e, #16a34a)",
+                    color: "white",
+                    opacity: fcsStatus === "loading" ? 0.7 : 1,
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  {health.message}
+                  {fcsStatus === "loading" ? "Loading…" : "+ Browse FCS"}
+                </button>
+              </div>
+            </div>
+
+            {/* Loaded files list */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "0.35rem 0.5rem" }}>
+              {loadedFiles.length === 0 && (
+                <div style={{ fontSize: "0.73rem", color: "#4b5563", fontStyle: "italic", padding: "0.5rem 0.15rem" }}>
+                  No files loaded — browse an FCS file to begin.
                 </div>
               )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => void checkHealth()}
-              style={{
-                padding: "0.55rem 1.1rem",
-                borderRadius: "999px",
-                border: "none",
-                fontSize: "0.9rem",
-                fontWeight: 500,
-                cursor: "pointer",
-                background:
-                  "linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899)",
-                color: "white",
-                boxShadow:
-                  "0 10px 30px rgba(129,140,248,0.6), 0 0 0 1px rgba(129,140,248,0.5)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Re-check
-            </button>
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: "1.25rem 1.75rem",
-            borderRadius: "1.25rem",
-            background:
-              "linear-gradient(145deg, rgba(15,23,42,0.95), rgba(15,23,42,0.85))",
-            boxShadow:
-              "0 20px 50px rgba(15,23,42,0.9), 0 0 0 1px rgba(148,163,184,0.3)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.8rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "#9ca3af",
-              marginBottom: "0.75rem",
-            }}
-          >
-            Workspace
-          </div>
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const res = await fetch(`${API_BASE}/api/workspace/save`, { method: "POST" });
-                  if (!res.ok) throw new Error(await res.text());
-                  type WsFile = { path: string; id?: string | null; n_channels?: number | null };
-                  type WorkspaceSavePayload = {
-                    version?: number;
-                    files: WsFile[];
-                    compensation: unknown;
-                    gates: unknown[];
-                    default_axes?: Record<
-                      string,
-                      { x_channel: string; y_channel: string; transform_x: string; transform_y: string }
-                    >;
-                  };
-                  const ws = (await res.json()) as WorkspaceSavePayload;
-                  const mergedAxes: NonNullable<WorkspaceSavePayload["default_axes"]> = {
-                    ...(ws.default_axes ?? {}),
-                  };
-                  for (const entry of ws.files) {
-                    const fid = entry.id;
-                    if (!fid) continue;
-                    if (file?.id === fid && xChannel && yChannel) {
-                      mergedAxes[fid] = {
-                        x_channel: xChannel,
-                        y_channel: yChannel,
-                        transform_x: transformX,
-                        transform_y: transformY,
-                      };
-                    } else {
-                      const saved = perFileAxesRef.current.get(fid);
-                      if (saved?.x && saved.y) {
-                        mergedAxes[fid] = {
-                          x_channel: saved.x,
-                          y_channel: saved.y,
-                          transform_x: saved.tx,
-                          transform_y: saved.ty,
-                        };
-                      }
-                    }
-                  }
-                  const wsOut = { ...ws, default_axes: mergedAxes };
-                  const wsStr = JSON.stringify(wsOut, null, 2);
-                  // F-2: persist to session file (non-blocking, ignore errors)
-                  fetch(`${API_BASE}/api/session/save`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: wsStr,
-                  }).catch(() => { /* session save is best-effort */ });
-                  const result =
-                    (await window.opencyto?.saveWorkspaceFile?.(wsStr)) ?? { canceled: true };
-                  if (!result.canceled) setFcsError(null);
-                } catch (err) {
-                  setFcsError(err instanceof Error ? err.message : String(err));
-                }
-              }}
-              style={{
-                padding: "0.4rem 0.8rem",
-                borderRadius: "0.5rem",
-                border: "1px solid rgba(148,163,184,0.5)",
-                fontSize: "0.85rem",
-                cursor: "pointer",
-                background: "rgba(30,41,59,0.6)",
-                color: "#e5e7eb",
-              }}
-            >
-              Save workspace
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const result = (await window.opencyto?.loadWorkspaceFile?.()) ?? { canceled: true };
-                  if (result.canceled || !result.content) return;
-                  const body = JSON.parse(result.content) as unknown;
-                  await loadWorkspaceFromParsedBody(body);
-                } catch (err) {
-                  setFcsError(err instanceof Error ? err.message : String(err));
-                }
-              }}
-              style={{
-                padding: "0.4rem 0.8rem",
-                borderRadius: "0.5rem",
-                border: "1px solid rgba(74,222,128,0.5)",
-                fontSize: "0.85rem",
-                cursor: "pointer",
-                background: "rgba(34,197,94,0.15)",
-                color: "#4ade80",
-              }}
-            >
-              Load workspace
-            </button>
-          </div>
-        </div>
-        <div
-          style={{
-            padding: "0.9rem 1rem",
-            borderRadius: "0.9rem",
-            background: "rgba(127,29,29,0.18)",
-            border: "1px solid rgba(248,113,113,0.45)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.72rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "#fca5a5",
-              marginBottom: "0.35rem",
-            }}
-          >
-            Crash Debug (Temporary)
-          </div>
-          <div style={{ fontSize: "0.78rem", color: "#fecaca", marginBottom: "0.35rem", wordBreak: "break-all" }}>
-            <strong>Log file:</strong> {debugLogPath || "(not available)"}
-          </div>
-          {debugLastRuntimeError && (
-            <div style={{ fontSize: "0.78rem", color: "#fee2e2", marginBottom: "0.35rem" }}>
-              <strong>Last runtime error:</strong> {debugLastRuntimeError}
-            </div>
-          )}
-          {debugUiStatus && (
-            <div style={{ fontSize: "0.75rem", color: "#fca5a5", marginBottom: "0.35rem" }}>
-              {debugUiStatus}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={() =>
-                runSafeUiAction("clear-debug-log", async () => {
-                  const r = await window.opencyto?.clearDebugLog?.();
-                  if (r?.ok) {
-                    setDebugUiStatus(`Cleared log at ${r.path ?? debugLogPath}`);
-                    debugLog("[ui.debug] cleared log");
-                  } else {
-                    setDebugUiStatus(`Failed to clear log: ${r?.error ?? "unknown"}`);
-                  }
-                })}
-              style={{
-                padding: "0.25rem 0.55rem",
-                borderRadius: "0.35rem",
-                border: "1px solid rgba(252,165,165,0.65)",
-                fontSize: "0.75rem",
-                cursor: "pointer",
-                background: "transparent",
-                color: "#fecaca",
-              }}
-            >
-              Clear debug log
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const snapshot = `[ui.debug.snapshot] file=${file?.id ?? "none"} tx=${transformX} ty=${transformY} x=${xChannel} y=${yChannel} status=${fcsStatus}`;
-                debugLog(snapshot);
-                setDebugUiStatus("Wrote state snapshot to debug log");
-              }}
-              style={{
-                padding: "0.25rem 0.55rem",
-                borderRadius: "0.35rem",
-                border: "1px solid rgba(252,165,165,0.65)",
-                fontSize: "0.75rem",
-                cursor: "pointer",
-                background: "transparent",
-                color: "#fecaca",
-              }}
-            >
-              Write state snapshot
-            </button>
-          </div>
-        </div>
-        </div>
-
-        <div
-          style={{
-            minWidth: 0,
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-        <div
-          style={{
-            padding: "1.75rem 1.75rem",
-            borderRadius: "1.25rem",
-            background:
-              "linear-gradient(145deg, rgba(15,23,42,0.97), rgba(15,23,42,0.9))",
-            boxShadow:
-              "0 24px 60px rgba(15,23,42,0.95), 0 0 0 1px rgba(148,163,184,0.35)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "1rem",
-              gap: "1rem",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: "0.8rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                  color: "#9ca3af",
-                  marginBottom: "0.25rem",
-                }}
-              >
-                Quick FSC/SSC Preview
-              </div>
-              <div style={{ fontSize: "1.05rem", fontWeight: 500 }}>
-                Load a single FCS file and see an FSC vs SSC dot plot.
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              position: "relative",
-              marginBottom: "0.75rem",
-            }}
-          >
-            <input
-              type="text"
-              value={fcsPath}
-              readOnly
-              placeholder="Select FCS file…"
-              style={{
-                width: "100%",
-                padding: "0.55rem 7.5rem 0.55rem 0.75rem",
-                borderRadius: "0.75rem",
-                border: "1px solid rgba(148,163,184,0.7)",
-                backgroundColor: "rgba(15,23,42,0.35)",
-                color: "white",
-                fontSize: "0.9rem",
-                outline: "none",
-              }}
-            />
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const paths = (await window.opencyto?.openFcsFiles?.()) ?? [];
-                  if (!paths || paths.length === 0) return;
-                  // For now, load the first selected file; later we can batch.
-                  setFcsPath(paths[0]);
-                  await handleLoadFcs(paths[0]);
-                } catch (err) {
-                  setFcsError(err instanceof Error ? err.message : String(err));
-                }
-              }}
-              disabled={fcsStatus === "loading"}
-              style={{
-                position: "absolute",
-                right: "0.25rem",
-                top: "0.2rem",
-                padding: "0.45rem 0.9rem",
-                borderRadius: "0.7rem",
-                border: "none",
-                fontSize: "0.85rem",
-                fontWeight: 500,
-                cursor: "pointer",
-                background:
-                  "linear-gradient(135deg, #22c55e, #16a34a, #22c55e)",
-                color: "white",
-                opacity: fcsStatus === "loading" ? 0.7 : 1,
-                whiteSpace: "nowrap",
-                boxShadow: "0 8px 20px rgba(34,197,94,0.45)",
-              }}
-            >
-              {fcsStatus === "loading" ? "Loading…" : "Browse FCS…"}
-            </button>
-          </div>
-
-          {loadedFiles.length > 0 && (
-            <div
-              style={{
-                marginBottom: "0.8rem",
-                padding: "0.45rem 0.55rem",
-                borderRadius: "0.7rem",
-                background: "rgba(15,23,42,0.9)",
-                border: "1px solid rgba(148,163,184,0.4)",
-                maxHeight: "6.5rem",
-                overflowY: "auto",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "0.75rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: "#9ca3af",
-                  marginBottom: "0.25rem",
-                }}
-              >
-                Loaded files
-              </div>
               {loadedFiles.map((lf) => {
                 const isActive = file?.id === lf.id;
                 return (
@@ -2114,97 +1814,42 @@ export const App: React.FC = () => {
                     type="button"
                     onClick={async () => {
                       if (file?.id && file.id !== lf.id) {
-                        perFileAxesRef.current.set(file.id, {
-                          x: xChannel,
-                          y: yChannel,
-                          tx: transformX,
-                          ty: transformY,
-                        });
+                        perFileAxesRef.current.set(file.id, { x: xChannel, y: yChannel, tx: transformX, ty: transformY });
                       }
                       setActiveGateId(null);
                       setFcsStatus("loading");
                       try {
-                        type ChannelsResp = {
-                          id: string;
-                          path: string;
-                          sample_name?: string | null;
-                          event_count: number;
-                          channels: Array<{ name: string; index: number; stain: string | null; display_name: string; range: number | null }>;
-                          spillover?: number[][] | null;
-                        };
-                        const meta = await getJson<ChannelsResp>(
-                          `${API_BASE}/api/files/${encodeURIComponent(lf.id)}/channels`,
-                        );
-                        const channelMeta: ChannelInfo[] = meta.channels.map((c) => ({
-                          name: c.name,
-                          index: c.index,
-                          stain: c.stain ?? null,
-                          display_name: c.display_name ?? c.name,
-                          ui_label: getUiChannelLabel(c.name, c.display_name ?? c.name, meta.path ?? meta.sample_name ?? null),
-                          range: c.range ?? null,
-                        }));
+                        type ChannelsResp = { id: string; path: string; sample_name?: string | null; event_count: number; channels: Array<{ name: string; index: number; stain: string | null; display_name: string; range: number | null }>; spillover?: number[][] | null };
+                        const meta = await getJson<ChannelsResp>(`${API_BASE}/api/files/${encodeURIComponent(lf.id)}/channels`);
+                        const channelMeta: ChannelInfo[] = meta.channels.map((c) => ({ name: c.name, index: c.index, stain: c.stain ?? null, display_name: c.display_name ?? c.name, ui_label: getUiChannelLabel(c.name, c.display_name ?? c.name, meta.path ?? meta.sample_name ?? null), range: c.range ?? null }));
                         const names = channelMeta.map((c) => c.name);
-                        const updated: LoadedFile = {
-                          ...lf,
-                          event_count: meta.event_count,
-                          channels: names,
-                          spillover: meta.spillover ?? lf.spillover ?? null,
-                        };
+                        const updated: LoadedFile = { ...lf, event_count: meta.event_count, channels: names, spillover: meta.spillover ?? lf.spillover ?? null };
                         const saved = perFileAxesRef.current.get(lf.id);
                         setFile(updated);
                         setChannels(channelMeta);
                         setXChannel(saved?.x && names.includes(saved.x) ? saved.x : names[0] ?? "");
                         setYChannel(saved?.y && names.includes(saved.y) ? saved.y : names[1] ?? names[0] ?? "");
-                        if (saved) {
-                          setTransformX(saved.tx ?? DEFAULT_X_TRANSFORM);
-                          setTransformY(saved.ty ?? DEFAULT_Y_TRANSFORM);
-                        } else {
-                          setTransformX(DEFAULT_X_TRANSFORM);
-                          setTransformY(DEFAULT_Y_TRANSFORM);
-                        }
-                        setLoadedFiles((prev) =>
-                          prev.map((f) => (f.id === lf.id ? updated : f)),
-                        );
-                        // J-2: auto-populate spillover table on file switch
+                        if (saved) { setTransformX(saved.tx ?? DEFAULT_X_TRANSFORM); setTransformY(saved.ty ?? DEFAULT_Y_TRANSFORM); }
+                        else { setTransformX(DEFAULT_X_TRANSFORM); setTransformY(DEFAULT_Y_TRANSFORM); }
+                        setLoadedFiles((prev) => prev.map((f) => (f.id === lf.id ? updated : f)));
                         void loadSpilloverFromFile(lf.id);
-                        // E-5: sync compensation badge with backend state for this file
                         try {
                           type CompStatusResp = { is_compensated: boolean; cond?: number | null };
-                          const cs = await getJson<CompStatusResp>(
-                            `${API_BASE}/api/compensation/status/${encodeURIComponent(lf.id)}`,
-                          );
+                          const cs = await getJson<CompStatusResp>(`${API_BASE}/api/compensation/status/${encodeURIComponent(lf.id)}`);
                           setIsCompensated(cs.is_compensated);
                           setCompCond(cs.is_compensated ? (cs.cond ?? null) : null);
                           setCompStatus(cs.is_compensated ? "success" : "idle");
-                        } catch {
-                          setIsCompensated(false);
-                          setCompCond(null);
-                          setCompStatus("idle");
-                        }
+                        } catch { setIsCompensated(false); setCompCond(null); setCompStatus("idle"); }
                         setCompError(null);
                         setFcsStatus("loaded");
                       } catch {
                         setFile(lf);
-                        setChannels(
-                          lf.channels.map((name, idx) => ({
-                            name,
-                            index: idx + 1,
-                            stain: null,
-                            display_name: name,
-                            ui_label: getUiChannelLabel(name, name, lf.path),
-                            range: null,
-                          })),
-                        );
+                        setChannels(lf.channels.map((name, idx) => ({ name, index: idx + 1, stain: null, display_name: name, ui_label: getUiChannelLabel(name, name, lf.path), range: null })));
                         const saved = perFileAxesRef.current.get(lf.id);
                         setXChannel(saved?.x ?? lf.channels[0] ?? "");
                         setYChannel(saved?.y ?? lf.channels[1] ?? lf.channels[0] ?? "");
-                        if (saved) {
-                          setTransformX(saved.tx ?? DEFAULT_X_TRANSFORM);
-                          setTransformY(saved.ty ?? DEFAULT_Y_TRANSFORM);
-                        } else {
-                          setTransformX(DEFAULT_X_TRANSFORM);
-                          setTransformY(DEFAULT_Y_TRANSFORM);
-                        }
+                        if (saved) { setTransformX(saved.tx ?? DEFAULT_X_TRANSFORM); setTransformY(saved.ty ?? DEFAULT_Y_TRANSFORM); }
+                        else { setTransformX(DEFAULT_X_TRANSFORM); setTransformY(DEFAULT_Y_TRANSFORM); }
                         setFcsStatus("loaded");
                       }
                     }}
@@ -2212,451 +1857,190 @@ export const App: React.FC = () => {
                       display: "block",
                       width: "100%",
                       textAlign: "left",
-                      padding: "0.25rem 0.4rem",
-                      borderRadius: "0.45rem",
+                      padding: "0.28rem 0.5rem",
+                      borderRadius: "0.4rem",
                       border: "none",
-                      backgroundColor: isActive
-                        ? "rgba(34,197,94,0.18)"
-                        : "transparent",
-                      color: isActive ? "#bbf7d0" : "#e5e7eb",
-                      fontSize: "0.8rem",
+                      backgroundColor: isActive ? "rgba(167,139,250,0.18)" : "transparent",
+                      color: isActive ? "#c4b5fd" : "#94a3b8",
+                      fontSize: "0.76rem",
                       cursor: "pointer",
+                      marginBottom: "0.1rem",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
                     }}
+                    title={lf.sample_name || lf.path}
                   >
-                    {lf.sample_name || lf.path.split(/[/\\\\]/).pop()}
+                    {isActive ? "▸ " : "  "}{lf.sample_name || lf.path.split(/[/\\]/).pop()}
                   </button>
                 );
               })}
-            </div>
-          )}
 
-          {/* T: Experiments (Phase T) */}
-          <div style={{ marginBottom: "0.8rem" }}>
-            <button
-              type="button"
-              onClick={() => setExperimentPanelOpen((o) => !o)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                width: "100%",
-                textAlign: "left",
-                padding: "0.3rem 0.5rem",
-                borderRadius: "0.55rem",
-                border: "1px solid rgba(148,163,184,0.35)",
-                background: experimentPanelOpen ? "rgba(77,166,255,0.12)" : "transparent",
-                color: "#90c8ff",
-                fontSize: "0.78rem",
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              <span>{experimentPanelOpen ? "▾" : "▸"}</span>
-              <span>Experiments</span>
-            </button>
-            {experimentPanelOpen && (
-              <div
-                style={{
-                  marginTop: "0.4rem",
-                  borderRadius: "0.65rem",
-                  background: "rgba(12,18,36,0.9)",
-                  border: "1px solid rgba(77,166,255,0.2)",
-                  overflow: "hidden",
-                  maxHeight: 360,
-                  overflowY: "auto",
-                }}
-              >
-                <ExperimentTree />
-              </div>
-            )}
-          </div>
-
-          {/* K: Sample groups panel */}
-          {loadedFiles.length > 0 && (
-            <div style={{ marginBottom: "0.8rem" }}>
-              <button
-                type="button"
-                onClick={() => { setGroupPanelOpen((o) => !o); if (!groupPanelOpen) void fetchGroups(); }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "0.3rem 0.5rem",
-                  borderRadius: "0.55rem",
-                  border: "1px solid rgba(148,163,184,0.35)",
-                  background: groupPanelOpen ? "rgba(99,102,241,0.12)" : "transparent",
-                  color: "#c7d2fe",
-                  fontSize: "0.78rem",
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
-              >
-                <span>{groupPanelOpen ? "▾" : "▸"}</span>
-                <span>Sample Groups</span>
-                {groups.length > 0 && (
-                  <span style={{ marginLeft: "auto", fontSize: "0.7rem", color: "#6b7280" }}>
-                    {groups.length}
-                  </span>
-                )}
-              </button>
-
-              {groupPanelOpen && (
-                <div
+              {/* Experiments */}
+              <div style={{ marginTop: "0.6rem" }}>
+                <button
+                  type="button"
+                  onClick={() => setExperimentPanelOpen((o) => !o)}
                   style={{
-                    marginTop: "0.4rem",
-                    padding: "0.5rem",
-                    borderRadius: "0.65rem",
-                    background: "rgba(15,23,42,0.85)",
-                    border: "1px solid rgba(99,102,241,0.3)",
-                    fontSize: "0.78rem",
-                    color: "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "0.25rem 0.5rem",
+                    borderRadius: "0.4rem",
+                    border: "none",
+                    background: experimentPanelOpen ? "rgba(77,166,255,0.1)" : "transparent",
+                    color: "#64748b",
+                    fontSize: "0.72rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
                   }}
                 >
-                  {/* Create group form */}
-                  <div style={{ marginBottom: "0.5rem" }}>
-                    <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: "0.3rem" }}>Create group</div>
-                    <input
-                      placeholder="Group name"
-                      value={newGroupName}
-                      onChange={(e) => setNewGroupName(e.target.value)}
-                      style={{
-                        width: "100%",
-                        marginBottom: "0.3rem",
-                        borderRadius: "0.4rem",
-                        border: "1px solid rgba(148,163,184,0.4)",
-                        background: "rgba(15,23,42,0.7)",
-                        color: "white",
-                        fontSize: "0.78rem",
-                        padding: "0.2rem 0.4rem",
-                      }}
-                    />
-                    <div style={{ marginBottom: "0.3rem", fontSize: "0.72rem", color: "#6b7280" }}>Select files:</div>
-                    {loadedFiles.map((lf) => {
-                      const label = lf.sample_name || lf.path.split(/[/\\]/).pop() || lf.id;
-                      const checked = newGroupFileIds.includes(lf.id);
-                      return (
-                        <label
-                          key={lf.id}
-                          style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginBottom: "0.15rem", cursor: "pointer" }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) =>
-                              setNewGroupFileIds((prev) =>
-                                e.target.checked ? [...prev, lf.id] : prev.filter((id) => id !== lf.id),
-                              )
-                            }
-                          />
-                          <span style={{ fontSize: "0.72rem", color: "#e5e7eb" }}>{label}</span>
-                        </label>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      disabled={!newGroupName.trim() || newGroupFileIds.length === 0}
-                      onClick={async () => {
-                        setGroupError(null);
-                        try {
-                          await createGroup(newGroupName.trim(), newGroupFileIds);
-                          setNewGroupName("");
-                          setNewGroupFileIds([]);
-                        } catch (err) {
-                          setGroupError(err instanceof Error ? err.message : String(err));
-                        }
-                      }}
-                      style={{
-                        marginTop: "0.3rem",
-                        padding: "0.25rem 0.7rem",
-                        borderRadius: "999px",
-                        border: "none",
-                        background: "linear-gradient(135deg, #6366f1, #4f46e5)",
-                        color: "white",
-                        fontSize: "0.75rem",
-                        cursor: "pointer",
-                        opacity: !newGroupName.trim() || newGroupFileIds.length === 0 ? 0.5 : 1,
-                      }}
-                    >
-                      Create
-                    </button>
-                    {groupError && <div style={{ color: "#fca5a5", fontSize: "0.72rem", marginTop: "0.2rem" }}>{groupError}</div>}
+                  <span style={{ fontSize: "0.65rem" }}>{experimentPanelOpen ? "▾" : "▸"}</span>
+                  Experiments
+                </button>
+                {experimentPanelOpen && (
+                  <div style={{ marginTop: "0.2rem", borderRadius: "0.5rem", background: "rgba(12,18,36,0.7)", border: "1px solid rgba(77,166,255,0.15)", overflow: "hidden", maxHeight: 280, overflowY: "auto" }}>
+                    <ExperimentTree />
                   </div>
+                )}
+              </div>
 
-                  {/* Group list */}
-                  {groups.length === 0 && (
-                    <div style={{ color: "#4b5563", fontStyle: "italic", fontSize: "0.72rem" }}>No groups yet.</div>
-                  )}
-                  {groups.map((grp) => {
-                    const isExpanded = expandedGroupId === grp.id;
-                    return (
-                      <div
-                        key={grp.id}
-                        style={{
-                          marginBottom: "0.4rem",
-                          borderRadius: "0.5rem",
-                          border: "1px solid rgba(99,102,241,0.25)",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {/* Group header row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            padding: "0.25rem 0.4rem",
-                            background: isExpanded ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.06)",
-                            gap: "0.4rem",
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setExpandedGroupId(isExpanded ? null : grp.id)}
-                            style={{ background: "none", border: "none", color: "#c7d2fe", cursor: "pointer", fontSize: "0.78rem", padding: 0, flex: 1, textAlign: "left" }}
-                          >
-                            {isExpanded ? "▾" : "▸"} {grp.name}
-                            <span style={{ marginLeft: "0.4rem", color: "#6b7280", fontSize: "0.7rem" }}>
-                              ({grp.samples.length} {grp.samples.length === 1 ? "sample" : "samples"})
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            title="Delete group"
-                            onClick={() => void deleteGroup(grp.id)}
-                            style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: "0.8rem", padding: "0 0.2rem" }}
-                          >
-                            ✕
-                          </button>
-                        </div>
+              {/* Sample Groups */}
+              {loadedFiles.length > 0 && (
+                <div style={{ marginTop: "0.4rem" }}>
+                  <button
+                    type="button"
+                    onClick={() => { setGroupPanelOpen((o) => !o); if (!groupPanelOpen) void fetchGroups(); }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.3rem",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "0.4rem",
+                      border: "none",
+                      background: groupPanelOpen ? "rgba(99,102,241,0.1)" : "transparent",
+                      color: "#64748b",
+                      fontSize: "0.72rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.65rem" }}>{groupPanelOpen ? "▾" : "▸"}</span>
+                    Sample Groups
+                    {groups.length > 0 && <span style={{ marginLeft: "auto", fontWeight: 400, color: "#4b5563" }}>{groups.length}</span>}
+                  </button>
 
-                        {/* Expanded group details */}
-                        {isExpanded && (
-                          <div style={{ padding: "0.4rem 0.5rem", background: "rgba(15,23,42,0.6)" }}>
-                            {/* Sample list */}
-                            <div style={{ marginBottom: "0.4rem" }}>
-                              {grp.samples.map((s) => (
-                                <div key={s.file_id} style={{ fontSize: "0.72rem", color: "#9ca3af", padding: "0.1rem 0" }}>
-                                  {s.label}
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Template section */}
-                            <div style={{ borderTop: "1px solid rgba(148,163,184,0.15)", paddingTop: "0.4rem", marginBottom: "0.4rem" }}>
-                              <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: "0.25rem", fontSize: "0.72rem" }}>
-                                Gating Template {grp.template_id && <span style={{ color: "#4ade80" }}>✓ extracted</span>}
-                              </div>
-                              <select
-                                value={tplSourceFileId}
-                                onChange={(e) => setTplSourceFileId(e.target.value)}
-                                style={{
-                                  width: "100%",
-                                  marginBottom: "0.25rem",
-                                  borderRadius: "0.35rem",
-                                  border: "1px solid rgba(148,163,184,0.4)",
-                                  background: "rgba(15,23,42,0.7)",
-                                  color: "white",
-                                  fontSize: "0.72rem",
-                                  padding: "0.18rem 0.3rem",
-                                }}
-                              >
-                                <option value="">— source file —</option>
-                                {grp.samples.map((s) => (
-                                  <option key={s.file_id} value={s.file_id}>{s.label}</option>
-                                ))}
-                              </select>
-                              <input
-                                placeholder="Template name"
-                                value={tplName}
-                                onChange={(e) => setTplName(e.target.value)}
-                                style={{
-                                  width: "100%",
-                                  marginBottom: "0.25rem",
-                                  borderRadius: "0.35rem",
-                                  border: "1px solid rgba(148,163,184,0.4)",
-                                  background: "rgba(15,23,42,0.7)",
-                                  color: "white",
-                                  fontSize: "0.72rem",
-                                  padding: "0.18rem 0.3rem",
-                                }}
-                              />
-                              <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
-                                <button
-                                  type="button"
-                                  disabled={!tplSourceFileId || !tplName.trim() || tplStatus === "working"}
-                                  onClick={async () => {
-                                    setTplStatus("working");
-                                    setTplError(null);
-                                    try {
-                                      type TplResp = { id: string; name: string; source_file_id: string; gate_count: number };
-                                      await postJson<TplResp>(`${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/template`, {
-                                        source_file_id: tplSourceFileId,
-                                        template_name: tplName.trim(),
-                                      });
-                                      await fetchGroups();
-                                      setTplName("");
-                                      setTplSourceFileId("");
-                                      setTplStatus("done");
-                                    } catch (err) {
-                                      setTplError(err instanceof Error ? err.message : String(err));
-                                      setTplStatus("error");
-                                    }
-                                  }}
-                                  style={{
-                                    padding: "0.2rem 0.5rem",
-                                    borderRadius: "999px",
-                                    border: "none",
-                                    background: "rgba(99,102,241,0.5)",
-                                    color: "white",
-                                    fontSize: "0.72rem",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  Extract
-                                </button>
-                                {grp.template_id && (
-                                  <button
-                                    type="button"
-                                    disabled={tplStatus === "working"}
-                                    onClick={async () => {
-                                      setTplStatus("working");
-                                      setTplError(null);
-                                      try {
-                                        await postJson(`${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/apply-template`, {
-                                          template_id: grp.template_id,
-                                        });
-                                        setTplStatus("done");
-                                        // Refresh gate tree if current file is in this group
-                                        if (file && grp.samples.some((s) => s.file_id === file.id)) {
-                                          await fetchGateTree(file.id);
-                                        }
-                                      } catch (err) {
-                                        setTplError(err instanceof Error ? err.message : String(err));
-                                        setTplStatus("error");
-                                      }
-                                    }}
-                                    style={{
-                                      padding: "0.2rem 0.5rem",
-                                      borderRadius: "999px",
-                                      border: "none",
-                                      background: "rgba(34,197,94,0.4)",
-                                      color: "white",
-                                      fontSize: "0.72rem",
-                                      cursor: "pointer",
-                                    }}
-                                  >
-                                    Apply to all
-                                  </button>
-                                )}
-                              </div>
-                              {tplStatus === "done" && <div style={{ color: "#4ade80", fontSize: "0.7rem", marginTop: "0.2rem" }}>Done</div>}
-                              {tplStatus === "error" && tplError && <div style={{ color: "#fca5a5", fontSize: "0.7rem", marginTop: "0.2rem" }}>{tplError}</div>}
-                            </div>
-
-                            {/* Batch statistics section */}
-                            <div style={{ borderTop: "1px solid rgba(148,163,184,0.15)", paddingTop: "0.4rem" }}>
-                              <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: "0.25rem", fontSize: "0.72rem" }}>Batch Statistics</div>
-                              <div style={{ display: "flex", gap: "0.3rem", marginBottom: "0.3rem" }}>
-                                <input
-                                  placeholder="Gate name"
-                                  value={batchGateName}
-                                  onChange={(e) => setBatchGateName(e.target.value)}
-                                  style={{
-                                    flex: 1,
-                                    borderRadius: "0.35rem",
-                                    border: "1px solid rgba(148,163,184,0.4)",
-                                    background: "rgba(15,23,42,0.7)",
-                                    color: "white",
-                                    fontSize: "0.72rem",
-                                    padding: "0.18rem 0.3rem",
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  disabled={!batchGateName.trim() || batchStatsLoading}
-                                  onClick={async () => {
-                                    setBatchStatsLoading(true);
-                                    try {
-                                      type StatsResp = { group_id: string; gate_name: string; rows: BatchStatRow[] };
-                                      const data = await getJson<StatsResp>(
-                                        `${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/batch-stats?gate_name=${encodeURIComponent(batchGateName.trim())}`,
-                                      );
-                                      setBatchStats({ groupId: grp.id, rows: data.rows });
-                                    } finally {
-                                      setBatchStatsLoading(false);
-                                    }
-                                  }}
-                                  style={{
-                                    padding: "0.2rem 0.5rem",
-                                    borderRadius: "999px",
-                                    border: "none",
-                                    background: "rgba(99,102,241,0.5)",
-                                    color: "white",
-                                    fontSize: "0.72rem",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  {batchStatsLoading ? "…" : "Run"}
-                                </button>
-                              </div>
-
-                              {batchStats && batchStats.groupId === grp.id && (
-                                <>
-                                  <div style={{ overflowX: "auto", marginBottom: "0.3rem" }}>
-                                    <table style={{ borderCollapse: "collapse", fontSize: "0.7rem", width: "100%" }}>
-                                      <thead>
-                                        <tr style={{ color: "#6b7280", borderBottom: "1px solid rgba(148,163,184,0.2)" }}>
-                                          <th style={{ textAlign: "left", padding: "0.15rem 0.25rem" }}>Sample</th>
-                                          <th style={{ textAlign: "right", padding: "0.15rem 0.25rem" }}>Count</th>
-                                          <th style={{ textAlign: "right", padding: "0.15rem 0.25rem" }}>% Parent</th>
-                                          <th style={{ textAlign: "right", padding: "0.15rem 0.25rem" }}>% Total</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {batchStats.rows.map((row) => (
-                                          <tr key={row.file_id} style={{ borderBottom: "1px solid rgba(148,163,184,0.1)" }}>
-                                            <td style={{ padding: "0.15rem 0.25rem", color: "#e5e7eb", maxWidth: "100px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                              {row.label}
-                                            </td>
-                                            <td style={{ padding: "0.15rem 0.25rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#e5e7eb" }}>
-                                              {row.count.toLocaleString()}
-                                            </td>
-                                            <td style={{ padding: "0.15rem 0.25rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#93c5fd" }}>
-                                              {row.pct_of_parent.toFixed(1)}%
-                                            </td>
-                                            <td style={{ padding: "0.15rem 0.25rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6b7280" }}>
-                                              {row.pct_of_total.toFixed(1)}%
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                  <a
-                                    href={`${API_BASE}/api/groups/${encodeURIComponent(grp.id)}/export.csv?gate_name=${encodeURIComponent(batchGateName.trim())}`}
-                                    download
-                                    style={{
-                                      fontSize: "0.7rem",
-                                      color: "#a5b4fc",
-                                      textDecoration: "none",
-                                      borderBottom: "1px solid rgba(165,180,252,0.4)",
-                                    }}
-                                  >
-                                    ↓ Export CSV
-                                  </a>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        )}
+                  {groupPanelOpen && (
+                    <div style={{ marginTop: "0.2rem", padding: "0.45rem 0.5rem", borderRadius: "0.5rem", background: "rgba(15,23,42,0.7)", border: "1px solid rgba(99,102,241,0.2)", fontSize: "0.75rem", color: "#9ca3af" }}>
+                      {/* Create group form */}
+                      <div style={{ marginBottom: "0.5rem" }}>
+                        <div style={{ fontWeight: 600, color: "#c7d2fe", marginBottom: "0.3rem", fontSize: "0.72rem" }}>New group</div>
+                        <input
+                          placeholder="Group name"
+                          value={newGroupName}
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          style={{ width: "100%", marginBottom: "0.25rem", borderRadius: "0.35rem", border: "1px solid rgba(148,163,184,0.3)", background: "rgba(15,23,42,0.8)", color: "white", fontSize: "0.73rem", padding: "0.2rem 0.4rem", boxSizing: "border-box" }}
+                        />
+                        {loadedFiles.map((lf) => {
+                          const label = lf.sample_name || lf.path.split(/[/\\]/).pop() || lf.id;
+                          const checked = newGroupFileIds.includes(lf.id);
+                          return (
+                            <label key={lf.id} style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginBottom: "0.1rem", cursor: "pointer", fontSize: "0.71rem" }}>
+                              <input type="checkbox" checked={checked} onChange={(e) => setNewGroupFileIds((prev) => e.target.checked ? [...prev, lf.id] : prev.filter((id) => id !== lf.id))} />
+                              <span style={{ color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                            </label>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          disabled={!newGroupName.trim() || newGroupFileIds.length === 0}
+                          onClick={async () => { setGroupError(null); try { await createGroup(newGroupName.trim(), newGroupFileIds); setNewGroupName(""); setNewGroupFileIds([]); } catch (err) { setGroupError(err instanceof Error ? err.message : String(err)); } }}
+                          style={{ marginTop: "0.25rem", padding: "0.2rem 0.6rem", borderRadius: "999px", border: "none", background: "linear-gradient(135deg, #6366f1, #4f46e5)", color: "white", fontSize: "0.72rem", cursor: "pointer", opacity: !newGroupName.trim() || newGroupFileIds.length === 0 ? 0.5 : 1 }}
+                        >Create</button>
+                        {groupError && <div style={{ color: "#fca5a5", fontSize: "0.7rem", marginTop: "0.15rem" }}>{groupError}</div>}
                       </div>
-                    );
-                  })}
+
+                      {groups.length === 0 && <div style={{ color: "#4b5563", fontStyle: "italic", fontSize: "0.7rem" }}>No groups yet.</div>}
+                      {groups.map((grp) => {
+                        const isExpanded = expandedGroupId === grp.id;
+                        return (
+                          <div key={grp.id} style={{ marginBottom: "0.3rem", borderRadius: "0.4rem", border: "1px solid rgba(99,102,241,0.2)", overflow: "hidden" }}>
+                            <div style={{ display: "flex", alignItems: "center", padding: "0.2rem 0.35rem", background: isExpanded ? "rgba(99,102,241,0.12)" : "rgba(99,102,241,0.05)", gap: "0.35rem" }}>
+                              <button type="button" onClick={() => setExpandedGroupId(isExpanded ? null : grp.id)} style={{ background: "none", border: "none", color: "#c7d2fe", cursor: "pointer", fontSize: "0.73rem", padding: 0, flex: 1, textAlign: "left" }}>
+                                {isExpanded ? "▾" : "▸"} {grp.name}
+                                <span style={{ marginLeft: "0.3rem", color: "#6b7280", fontSize: "0.68rem" }}>({grp.samples.length})</span>
+                              </button>
+                              <button type="button" title="Delete group" onClick={() => void deleteGroup(grp.id)} style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: "0.75rem", padding: "0 0.15rem" }}>✕</button>
+                            </div>
+                            {isExpanded && (
+                              <div style={{ padding: "0.3rem 0.4rem", background: "rgba(15,23,42,0.5)" }}>
+                                {grp.samples.map((s) => <div key={s.file_id} style={{ fontSize: "0.7rem", color: "#9ca3af", padding: "0.05rem 0" }}>{s.label}</div>)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
+
+            {/* Error display at bottom of sidebar */}
+            {fcsError && (
+              <div style={{ padding: "0.4rem 0.65rem", fontSize: "0.72rem", color: "#fca5a5", borderTop: "1px solid rgba(248,113,113,0.2)", background: "rgba(127,29,29,0.15)", flexShrink: 0 }}>
+                {fcsError}
+              </div>
+            )}
+          </div>
+        </aside>
+
+        {/* ── CENTER + RIGHT INSPECTOR (flex row, controls on right) ── */}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "row",
+            overflow: "hidden",
+          }}
+        >
+        {/* Inner wrapper: contains right-inspector (via order:2) and center (via order:1) */}
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "row",
+            overflow: "hidden",
+            gap: 0,
+          }}
+        >
+
+
+          {/* ── RIGHT INSPECTOR ── */}
+          <div
+            style={{
+              order: 2,
+              width: 252,
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflowY: "auto",
+              overflowX: "hidden",
+              background: "rgba(15,23,42,0.97)",
+              borderLeft: "1px solid rgba(148,163,184,0.12)",
+              padding: "0.6rem 0.7rem",
+              gap: "0.5rem",
+            }}
+          >
 
           {file && (
             <>
@@ -3665,22 +3049,1084 @@ export const App: React.FC = () => {
             </>
           )}
 
+
+            {file && (
+              <div
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "0.65rem 0.85rem",
+                  borderRadius: "0.65rem",
+                  background: "rgba(15,23,42,0.55)",
+                  border: "1px solid rgba(148,163,184,0.35)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "0.4rem",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: "#9ca3af",
+                    }}
+                  >
+                    Gate Hierarchy
+                  </div>
+                  {/* Q-1: Apply gates to other samples button */}
+                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                    {/* Q-4: Compensation button */}
+                    {file && (
+                      <button
+                        type="button"
+                        onClick={() => setCompensationModalOpen(true)}
+                        title="View compensation matrix"
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(168,85,247,0.4)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(168,85,247,0.1)",
+                          color: "#d8b4fe",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        🔬 Comp
+                      </button>
+                    )}
+                    {/* Q-3: Save layout button */}
+                    {gateTree.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSaveLayoutName("");
+                          setSaveLayoutModalOpen(true);
+                        }}
+                        title="Save current gate layout as template"
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(34,197,94,0.4)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(34,197,94,0.1)",
+                          color: "#86efac",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        💾 Save
+                      </button>
+                    )}
+                    {/* Q-3: Load layout dropdown */}
+                    {savedLayouts.length > 0 && (
+                      <select
+                        disabled={loadLayoutLoading}
+                        onChange={async (e) => {
+                          if (!e.target.value || !file) return;
+                          setLoadLayoutLoading(true);
+                          try {
+                            const res = await fetch(
+                              `${API_BASE}/api/layouts/${encodeURIComponent(e.target.value)}/apply?target_file_id=${encodeURIComponent(file.id)}`,
+                              { method: "POST" },
+                            );
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                            const result = await res.json();
+                            setGateMessage(`✓ Applied ${result.gates_applied} gates from "${result.layout_name}"`);
+                            await fetchGateTree(file.id);
+                          } catch (err) {
+                            const msg = err instanceof Error ? err.message : String(err);
+                            setGateMessage(`Error applying layout: ${msg}`);
+                          } finally {
+                            setLoadLayoutLoading(false);
+                            e.target.value = "";
+                          }
+                        }}
+                        style={{
+                          padding: "0.2rem 0.4rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(96,165,250,0.4)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(96,165,250,0.1)",
+                          color: "#60a5fa",
+                          opacity: loadLayoutLoading ? 0.6 : 1,
+                        }}
+                      >
+                        <option value="">📥 Load layout...</option>
+                        {savedLayouts.map((layout) => (
+                          <option key={layout.id} value={layout.id}>
+                            {layout.name} ({layout.gate_count} gates)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {/* S-4: Delete layout button */}
+                    {savedLayouts.length > 0 && (
+                      <select
+                        onChange={async (e) => {
+                          if (!e.target.value) return;
+                          const layoutId = e.target.value;
+                          const layout = savedLayouts.find((l) => l.id === layoutId);
+                          if (!layout) return;
+                          if (!window.confirm(`Delete layout "${layout.name}"?`)) { e.target.value = ""; return; }
+                          try {
+                            const res = await fetch(`${API_BASE}/api/layouts/${encodeURIComponent(layoutId)}`, { method: "DELETE" });
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                            const updated = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
+                            setSavedLayouts(updated);
+                            setGateMessage("✓ Layout deleted");
+                          } catch (err) {
+                            setGateMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+                          }
+                          e.target.value = "";
+                        }}
+                        style={{
+                          padding: "0.2rem 0.4rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(239,68,68,0.35)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(239,68,68,0.08)",
+                          color: "#fca5a5",
+                        }}
+                      >
+                        <option value="">🗑 Delete...</option>
+                        {savedLayouts.map((layout) => (
+                          <option key={layout.id} value={layout.id}>
+                            {layout.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {gateTree.length > 0 && allFiles.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setApplyGatesTargets(new Set());
+                          setApplyGatesModalOpen(true);
+                          setApplyGatesMessage("");
+                        }}
+                        title="Apply current gate layout to other samples"
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(147,51,234,0.4)",
+                          fontSize: "0.68rem",
+                          cursor: "pointer",
+                          background: "rgba(147,51,234,0.1)",
+                          color: "#c084fc",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        ⤵ Apply
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <GateTreePanel
+                  tree={gateTree}
+                  totalEvents={file.event_count}
+                  activeGateId={activeGateId}
+                  loading={gateTreeLoading}
+                  error={gateTreeError}
+                  onSelectGate={(id) => {
+                    setActiveGateId(id);
+                    setDrawMode(false);
+                    setPendingGate(null);
+                    setDrawingPolygon(null);
+                    setDrawingRect(null);
+                  }}
+                  onDeleteGate={async (id) => {
+                    try {
+                      const res = await fetch(`${API_BASE}/api/gates/${encodeURIComponent(id)}`, {
+                        method: "DELETE",
+                      });
+                      if (!res.ok) {
+                        const text = await res.text();
+                        throw new Error(text || `HTTP ${res.status}`);
+                      }
+                      const deletedNode = findNode(gateTree, id);
+                      if (deletedNode) {
+                        const flat = flattenTree([deletedNode]);
+                        if (flat.some((g) => g.id === activeGateId)) setActiveGateId(null);
+                      }
+                      if (file) await fetchGateTree(file.id);
+                    } catch (err) {
+                      const message = err instanceof Error ? err.message : String(err);
+                      setGateMessage(`Failed to delete gate: ${message}`);
+                    }
+                  }}
+                  onCreateChild={() => {
+                    setDrawMode(true);
+                    setGateTool("rectangle");
+                    setPendingGate(null);
+                    setDrawingPolygon(null);
+                    setDrawingRect(null);
+                  }}
+                  onRenameGate={handleRenameGate}
+                />
+
+                {/* Q-1: Apply gates modal */}
+                {applyGatesModalOpen && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      background: "rgba(0,0,0,0.5)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 9999,
+                      backdropFilter: "blur(2px)",
+                    }}
+                    onClick={() => !applyGatesLoading && setApplyGatesModalOpen(false)}
+                  >
+                    <div
+                      style={{
+                        background: "#0f172a",
+                        border: "1px solid rgba(148,163,184,0.3)",
+                        borderRadius: "0.5rem",
+                        padding: "clamp(1rem, 3vw, 1.5rem)",
+                        maxWidth: "clamp(260px, 90vw, 450px)",
+                        maxHeight: "min(90vh, 700px)",
+                        overflowY: "auto",
+                        boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                        width: "100%",
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          color: "#e5e7eb",
+                          marginBottom: "1rem",
+                        }}
+                      >
+                        Apply gates to other samples
+                      </div>
+
+                      <div style={{ marginBottom: "1rem", fontSize: "0.8rem", color: "#9ca3af" }}>
+                        Select samples to receive the current gate layout ({gateTree.length} gates):
+                      </div>
+
+                      <div style={{ marginBottom: "1rem", maxHeight: "300px", overflowY: "auto" }}>
+                        {allFiles.filter((f) => f.id !== file?.id).map((f) => (
+                          <label
+                            key={f.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                              padding: "0.5rem 0.4rem",
+                              cursor: "pointer",
+                              fontSize: "0.8rem",
+                              color: "#cbd5e1",
+                              borderRadius: "0.3rem",
+                              background: applyGatesTargets.has(f.id) ? "rgba(147,51,234,0.15)" : "transparent",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={applyGatesTargets.has(f.id)}
+                              onChange={(e) => {
+                                const newTargets = new Set(applyGatesTargets);
+                                if (e.target.checked) {
+                                  newTargets.add(f.id);
+                                } else {
+                                  newTargets.delete(f.id);
+                                }
+                                setApplyGatesTargets(newTargets);
+                              }}
+                              style={{ cursor: "pointer" }}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 500 }}>{f.sample_name}</div>
+                              <div style={{ fontSize: "0.7rem", color: "#6b7280" }}>
+                                {f.event_count.toLocaleString()} events
+                              </div>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+
+                      {applyGatesMessage && (
+                        <div
+                          style={{
+                            marginBottom: "1rem",
+                            padding: "0.5rem 0.4rem",
+                            borderRadius: "0.3rem",
+                            fontSize: "0.75rem",
+                            backgroundColor: applyGatesMessage.includes("Error") ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
+                            color: applyGatesMessage.includes("Error") ? "#fca5a5" : "#86efac",
+                          }}
+                        >
+                          {applyGatesMessage}
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setApplyGatesModalOpen(false)}
+                          disabled={applyGatesLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(148,163,184,0.3)",
+                            background: "transparent",
+                            color: "#94a3b8",
+                            fontSize: "0.8rem",
+                            cursor: "pointer",
+                            opacity: applyGatesLoading ? 0.5 : 1,
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (applyGatesTargets.size === 0) {
+                              setApplyGatesMessage("Select at least one sample");
+                              return;
+                            }
+                            setApplyGatesLoading(true);
+                            setApplyGatesMessage("");
+                            try {
+                              const targetIds = Array.from(applyGatesTargets);
+                              const params = new URLSearchParams({
+                                source_file_id: file!.id,
+                              });
+                              targetIds.forEach((id) => params.append("target_file_ids", id));
+                              const res = await fetch(`${API_BASE}/api/gates/copy?${params}`, {
+                                method: "POST",
+                              });
+                              if (!res.ok) {
+                                const text = await res.text();
+                                throw new Error(text || `HTTP ${res.status}`);
+                              }
+                              const result = await res.json();
+                              setApplyGatesMessage(
+                                `✓ Applied ${result.total_gates_copied} gates to ${targetIds.length} sample${targetIds.length === 1 ? "" : "s"}`,
+                              );
+                              setTimeout(() => setApplyGatesModalOpen(false), 2000);
+                            } catch (err) {
+                              const message = err instanceof Error ? err.message : String(err);
+                              setApplyGatesMessage(`Error: ${message}`);
+                            } finally {
+                              setApplyGatesLoading(false);
+                            }
+                          }}
+                          disabled={applyGatesTargets.size === 0 || applyGatesLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(147,51,234,0.5)",
+                            background: "rgba(147,51,234,0.2)",
+                            color: "#c084fc",
+                            fontSize: "0.8rem",
+                            cursor: applyGatesTargets.size === 0 || applyGatesLoading ? "not-allowed" : "pointer",
+                            opacity: applyGatesTargets.size === 0 || applyGatesLoading ? 0.5 : 1,
+                          }}
+                        >
+                          {applyGatesLoading ? "Applying..." : "Apply"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Q-3: Save layout modal */}
+                {saveLayoutModalOpen && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      background: "rgba(0,0,0,0.5)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 9999,
+                      backdropFilter: "blur(2px)",
+                    }}
+                    onClick={() => !saveLayoutLoading && setSaveLayoutModalOpen(false)}
+                  >
+                    <div
+                      style={{
+                        background: "#0f172a",
+                        border: "1px solid rgba(148,163,184,0.3)",
+                        borderRadius: "0.5rem",
+                        padding: "clamp(1rem, 3vw, 1.5rem)",
+                        maxWidth: "clamp(250px, 90vw, 420px)",
+                        boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
+                        width: "100%",
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          color: "#e5e7eb",
+                          marginBottom: "1rem",
+                        }}
+                      >
+                        Save gate layout as template
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="Layout name (e.g., 'Lymphocyte gating')"
+                        value={saveLayoutName}
+                        onChange={(e) => setSaveLayoutName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && saveLayoutName.trim()) {
+                            void (async () => {
+                              setSaveLayoutLoading(true);
+                              try {
+                                const res = await fetch(`${API_BASE}/api/layouts`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    name: saveLayoutName,
+                                    source_file_id: file!.id,
+                                  }),
+                                });
+                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                                const layout = await res.json();
+                                // Refresh layouts list
+                                const list = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
+                                setSavedLayouts(list);
+                                setSaveLayoutModalOpen(false);
+                                setGateMessage(`✓ Saved layout "${layout.name}"`);
+                              } catch (err) {
+                                const msg = err instanceof Error ? err.message : String(err);
+                                setGateMessage(`Error saving layout: ${msg}`);
+                              } finally {
+                                setSaveLayoutLoading(false);
+                              }
+                            })();
+                          }
+                        }}
+                        style={{
+                          width: "100%",
+                          padding: "0.5rem 0.6rem",
+                          borderRadius: "0.3rem",
+                          border: "1px solid rgba(148,163,184,0.3)",
+                          background: "rgba(30,41,59,0.8)",
+                          color: "#e5e7eb",
+                          fontSize: "0.85rem",
+                          marginBottom: "1rem",
+                          boxSizing: "border-box",
+                        }}
+                        disabled={saveLayoutLoading}
+                        autoFocus
+                      />
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setSaveLayoutModalOpen(false)}
+                          disabled={saveLayoutLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(148,163,184,0.3)",
+                            background: "transparent",
+                            color: "#94a3b8",
+                            fontSize: "0.8rem",
+                            cursor: "pointer",
+                            opacity: saveLayoutLoading ? 0.5 : 1,
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!saveLayoutName.trim()) return;
+                            setSaveLayoutLoading(true);
+                            try {
+                              const res = await fetch(`${API_BASE}/api/layouts`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  name: saveLayoutName,
+                                  source_file_id: file!.id,
+                                }),
+                              });
+                              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                              const layout = await res.json();
+                              // Refresh layouts list
+                              const list = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
+                              setSavedLayouts(list);
+                              setSaveLayoutModalOpen(false);
+                              setGateMessage(`✓ Saved layout "${layout.name}"`);
+                            } catch (err) {
+                              const msg = err instanceof Error ? err.message : String(err);
+                              setGateMessage(`Error saving layout: ${msg}`);
+                            } finally {
+                              setSaveLayoutLoading(false);
+                            }
+                          }}
+                          disabled={!saveLayoutName.trim() || saveLayoutLoading}
+                          style={{
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "0.3rem",
+                            border: "1px solid rgba(34,197,94,0.5)",
+                            background: "rgba(34,197,94,0.2)",
+                            color: "#86efac",
+                            fontSize: "0.8rem",
+                            cursor: !saveLayoutName.trim() || saveLayoutLoading ? "not-allowed" : "pointer",
+                            opacity: !saveLayoutName.trim() || saveLayoutLoading ? 0.5 : 1,
+                          }}
+                        >
+                          {saveLayoutLoading ? "Saving..." : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          {/* G: Statistics Panel */}
+          {file && (
+            <div
+              style={{
+                marginTop: "1rem",
+                borderRadius: "0.75rem",
+                border: "1px solid rgba(148,163,184,0.3)",
+                background: "rgba(15,23,42,0.5)",
+                overflow: "hidden",
+              }}
+            >
+              {/* Panel header / toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !statsExpanded;
+                  setStatsExpanded(next);
+                  // Eagerly fetch if opening with a gate selected
+                  if (next && activeGateId && !gateStats) {
+                    setGateStatsLoading(true);
+                    void getJson<GateStatsData>(`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/stats`)
+                      .then((d) => { setGateStats(d); setGateStatsLoading(false); })
+                      .catch(() => { setGateStats(null); setGateStatsLoading(false); });
+                  }
+                }}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "0.5rem 0.85rem",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#e5e7eb",
+                  fontSize: "0.78rem",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#9ca3af", fontWeight: 600 }}>
+                  Statistics
+                  {activeGateId && gateStats && (
+                    <span style={{ marginLeft: "0.5rem", color: "#64748b", fontWeight: 400, textTransform: "none" }}>
+                      — {gateStats.gate_name} ({gateStats.count.toLocaleString()} events, {gateStats.pct_of_parent.toFixed(1)}% of parent)
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{statsExpanded ? "▲" : "▼"}</span>
+              </button>
+
+              {statsExpanded && (
+                <div style={{ padding: "0 0.85rem 0.75rem" }}>
+                  {!activeGateId && (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b", paddingBottom: "0.5rem" }}>
+                      Select a gate to view per-channel statistics.
+                    </div>
+                  )}
+                  {activeGateId && gateStatsLoading && (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>Loading statistics…</div>
+                  )}
+                  {activeGateId && !gateStatsLoading && gateStats && (
+                    <>
+                      {/* CSV export */}
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.4rem" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rows = [
+                              ["Gate", gateStats.gate_name],
+                              ["Count", String(gateStats.count)],
+                              ["% of Parent", gateStats.pct_of_parent.toFixed(2)],
+                              ["% of Total", gateStats.pct_total.toFixed(2)],
+                              [],
+                              ["Channel", "MFI (mean)", "Median", "SD", "CV%"],
+                              ...gateStats.channel_stats.map((cs) => [
+                                cs.display_name || cs.channel_name,
+                                cs.mean.toFixed(2),
+                                cs.median.toFixed(2),
+                                cs.sd.toFixed(2),
+                                cs.cv != null ? cs.cv.toFixed(2) : "",
+                              ]),
+                            ];
+                            const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+                            const blob = new Blob([csv], { type: "text/csv" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = `${gateStats.gate_name.replace(/[^a-z0-9_-]/gi, "_")}_stats.csv`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          style={{
+                            padding: "0.2rem 0.55rem",
+                            borderRadius: "0.4rem",
+                            border: "1px solid rgba(148,163,184,0.5)",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            background: "rgba(30,41,59,0.6)",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          Export CSV
+                        </button>
+                        {/* P-1: Export gated events as CSV */}
+                        {activeGateId && (
+                          <a
+                            href={`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/export-csv`}
+                            download
+                            title={gateStats ? `Download ${gateStats.count.toLocaleString()} events as CSV` : "Download events as CSV"}
+                            style={{
+                              padding: "0.2rem 0.55rem",
+                              borderRadius: "0.4rem",
+                              border: "1px solid rgba(96,165,250,0.45)",
+                              fontSize: "0.75rem",
+                              cursor: "pointer",
+                              background: "rgba(96,165,250,0.1)",
+                              color: "#60a5fa",
+                              textDecoration: "none",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ↓ Events CSV{gateStats ? ` (${gateStats.count.toLocaleString()})` : ""}
+                          </a>
+                        )}
+                        {/* M: Export gated events as FCS */}
+                        {activeGateId && (
+                          <a
+                            href={`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/export-fcs`}
+                            download
+                            style={{
+                              padding: "0.2rem 0.55rem",
+                              borderRadius: "0.4rem",
+                              border: "1px solid rgba(34,197,94,0.45)",
+                              fontSize: "0.75rem",
+                              cursor: "pointer",
+                              background: "rgba(34,197,94,0.1)",
+                              color: "#4ade80",
+                              textDecoration: "none",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ↓ Export FCS
+                          </a>
+                        )}
+                      </div>
+                      {/* P-3: Stats table — sortable columns + clipboard copy */}
+                      {(() => {
+                        // Sort channel_stats by the active column
+                        const colKey: StatsSortCol = statsSortCol;
+                        const sorted = [...gateStats.channel_stats].sort((a, b) => {
+                          let va: number | string;
+                          let vb: number | string;
+                          if (colKey === "channel") {
+                            va = (a.display_name || a.channel_name).toLowerCase();
+                            vb = (b.display_name || b.channel_name).toLowerCase();
+                          } else if (colKey === "mean") { va = a.mean; vb = b.mean; }
+                          else if (colKey === "median") { va = a.median; vb = b.median; }
+                          else if (colKey === "sd") { va = a.sd; vb = b.sd; }
+                          else { va = a.cv ?? -Infinity; vb = b.cv ?? -Infinity; }
+                          const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+                          return statsSortDir === "asc" ? cmp : -cmp;
+                        });
+
+                        const handleHeaderClick = (col: StatsSortCol) => {
+                          if (statsSortCol === col) {
+                            setStatsSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                          } else {
+                            setStatsSortCol(col);
+                            setStatsSortDir(col === "channel" ? "asc" : "desc");
+                          }
+                        };
+
+                        const sortIcon = (col: StatsSortCol) =>
+                          statsSortCol === col ? (statsSortDir === "asc" ? " ▲" : " ▼") : "";
+
+                        const headers: { label: string; col: StatsSortCol; align: "left" | "right" }[] = [
+                          { label: "Channel", col: "channel", align: "left" },
+                          { label: "MFI", col: "mean", align: "right" },
+                          { label: "Median", col: "median", align: "right" },
+                          { label: "SD", col: "sd", align: "right" },
+                          { label: "CV%", col: "cv", align: "right" },
+                        ];
+
+                        const handleCopy = () => {
+                          const headerRow = headers.map((h) => h.label).join("\t");
+                          const dataRows = sorted.map((cs) =>
+                            [
+                              cs.display_name || cs.channel_name,
+                              cs.mean.toFixed(2),
+                              cs.median.toFixed(2),
+                              cs.sd.toFixed(2),
+                              cs.cv != null ? cs.cv.toFixed(2) : "",
+                            ].join("\t"),
+                          );
+                          void navigator.clipboard.writeText([headerRow, ...dataRows].join("\n"));
+                        };
+
+                        return (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.25rem" }}>
+                              <button
+                                type="button"
+                                onClick={handleCopy}
+                                title="Copy table to clipboard (tab-separated)"
+                                style={{
+                                  padding: "0.15rem 0.45rem",
+                                  borderRadius: "0.35rem",
+                                  border: "1px solid rgba(148,163,184,0.35)",
+                                  background: "transparent",
+                                  color: "#94a3b8",
+                                  fontSize: "0.72rem",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                📋 Copy
+                              </button>
+                            </div>
+                            <div style={{ overflowX: "auto" }}>
+                              <table
+                                style={{
+                                  width: "100%",
+                                  borderCollapse: "collapse",
+                                  fontSize: "0.75rem",
+                                  color: "#e5e7eb",
+                                }}
+                              >
+                                <thead>
+                                  <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
+                                    {headers.map(({ label, col, align }) => (
+                                      <th
+                                        key={col}
+                                        onClick={() => handleHeaderClick(col)}
+                                        style={{
+                                          padding: "0.25rem 0.4rem",
+                                          textAlign: align,
+                                          color: statsSortCol === col ? "#c4b5fd" : "#9ca3af",
+                                          fontWeight: statsSortCol === col ? 600 : 500,
+                                          whiteSpace: "nowrap",
+                                          cursor: "pointer",
+                                          userSelect: "none",
+                                        }}
+                                      >
+                                        {label}{sortIcon(col)}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {sorted.map((cs, i) => (
+                                    <tr
+                                      key={cs.channel_name}
+                                      style={{
+                                        background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
+                                      }}
+                                    >
+                                      <td
+                                        style={{
+                                          padding: "0.2rem 0.4rem",
+                                          color: "#cbd5e1",
+                                          maxWidth: "12rem",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                        title={cs.display_name || cs.channel_name}
+                                      >
+                                        {cs.display_name || cs.channel_name}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                        {cs.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                        {cs.median.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                        {cs.sd.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                      </td>
+                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: cs.cv != null && cs.cv > 100 ? "#fbbf24" : "#e5e7eb" }}>
+                                        {cs.cv != null ? cs.cv.toFixed(1) : "—"}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
+              )}
+
+          {/* Q-2: Populations summary report */}
+          {file && (
+            <div
+              style={{
+                marginTop: "1rem",
+                borderRadius: "0.75rem",
+                overflow: "hidden",
+                border: "1px solid rgba(100,116,139,0.35)",
+                background: "rgba(15,23,42,0.5)",
+              }}
+            >
+              {/* Panel header / toggle */}
+              <button
+                type="button"
+                onClick={() => setPopExpanded((x) => !x)}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "0.5rem 0.85rem",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#e5e7eb",
+                  fontSize: "0.78rem",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#9ca3af", fontWeight: 600 }}>
+                  Populations ({gateList.length})
+                </span>
+                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{popExpanded ? "▲" : "▼"}</span>
+              </button>
+
+              {popExpanded && (
+                <div style={{ padding: "0 0.85rem 0.75rem" }}>
+                  {gateList.length === 0 ? (
+                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                      No gates yet — draw gates to see population summary.
+                    </div>
+                  ) : (
+                    (() => {
+                      // Sort gates by active column
+                      const sorted = [...gateList].sort((a, b) => {
+                        let va: number | string;
+                        let vb: number | string;
+                        if (popSortCol === "name") {
+                          va = a.name.toLowerCase();
+                          vb = b.name.toLowerCase();
+                        } else if (popSortCol === "count") {
+                          va = a.count;
+                          vb = b.count;
+                        } else if (popSortCol === "pct_parent") {
+                          va = a.pct_of_parent ?? 0;
+                          vb = b.pct_of_parent ?? 0;
+                        } else {
+                          va = a.pct_of_total ?? 0;
+                          vb = b.pct_of_total ?? 0;
+                        }
+                        const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+                        return popSortDir === "asc" ? cmp : -cmp;
+                      });
+
+                      const handleHeaderClick = (col: PopulationSortCol) => {
+                        if (popSortCol === col) {
+                          setPopSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                        } else {
+                          setPopSortCol(col);
+                          setPopSortDir("desc");
+                        }
+                      };
+
+                      const sortIcon = (col: PopulationSortCol) =>
+                        popSortCol === col ? (popSortDir === "asc" ? " ▲" : " ▼") : "";
+
+                      const handleExport = () => {
+                        const header = ["Gate", "Count", "% Parent", "% Total"].join("\t");
+                        const rows = sorted.map((g) =>
+                          [g.name, g.count, (g.pct_of_parent ?? 0).toFixed(1), (g.pct_of_total ?? 0).toFixed(1)].join("\t"),
+                        );
+                        void navigator.clipboard.writeText([header, ...rows].join("\n"));
+                      };
+
+                      return (
+                        <>
+                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.25rem", gap: "0.5rem" }}>
+                            <button
+                              type="button"
+                              onClick={handleExport}
+                              title="Copy to clipboard (tab-separated)"
+                              style={{
+                                padding: "0.15rem 0.45rem",
+                                borderRadius: "0.35rem",
+                                border: "1px solid rgba(148,163,184,0.35)",
+                                background: "transparent",
+                                color: "#94a3b8",
+                                fontSize: "0.72rem",
+                                cursor: "pointer",
+                              }}
+                            >
+                              📋 Copy
+                            </button>
+                          </div>
+                          <div style={{ overflowX: "auto", fontSize: "0.75rem" }}>
+                            <table
+                              style={{
+                                width: "100%",
+                                borderCollapse: "collapse",
+                                color: "#e5e7eb",
+                              }}
+                            >
+                              <thead>
+                                <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
+                                  {(["Gate", "Count", "% Parent", "% Total"] as const).map((label, idx) => {
+                                    const col: PopulationSortCol = ["name", "count", "pct_parent", "pct_total"][idx] as PopulationSortCol;
+                                    return (
+                                      <th
+                                        key={label}
+                                        onClick={() => handleHeaderClick(col)}
+                                        style={{
+                                          padding: "0.25rem 0.4rem",
+                                          textAlign: label === "Gate" ? "left" : "right",
+                                          color: popSortCol === col ? "#c4b5fd" : "#9ca3af",
+                                          fontWeight: popSortCol === col ? 600 : 500,
+                                          whiteSpace: "nowrap",
+                                          cursor: "pointer",
+                                          userSelect: "none",
+                                        }}
+                                      >
+                                        {label}{sortIcon(col)}
+                                      </th>
+                                    );
+                                  })}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sorted.map((g, i) => (
+                                  <tr
+                                    key={g.id}
+                                    onClick={() => {
+                                      setActiveGateId(g.id);
+                                      setDrawMode(false);
+                                      setPendingGate(null);
+                                      setDrawingPolygon(null);
+                                      setDrawingRect(null);
+                                    }}
+                                    style={{
+                                      background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
+                                      cursor: "pointer",
+                                      opacity: activeGateId === g.id ? 1 : 0.7,
+                                    }}
+                                  >
+                                    <td
+                                      style={{
+                                        padding: "0.2rem 0.4rem",
+                                        color: activeGateId === g.id ? "#c4b5fd" : "#cbd5e1",
+                                        maxWidth: "10rem",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                        fontWeight: activeGateId === g.id ? 500 : 400,
+                                      }}
+                                      title={g.name}
+                                    >
+                                      {g.name}
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "0.2rem 0.4rem",
+                                        textAlign: "right",
+                                        fontVariantNumeric: "tabular-nums",
+                                      }}
+                                    >
+                                      {g.count.toLocaleString()}
+                                    </td>
+                                    <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                      {(g.pct_of_parent ?? 0).toFixed(1)}%
+                                    </td>
+                                    <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                      {(g.pct_of_total ?? 0).toFixed(1)}%
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+            </div>
+          )}
+
+          </div>{/* ── end RIGHT INSPECTOR ── */}
+
+          {/* ── CENTER CANVAS ── */}
+          <div
+            style={{
+              order: 1,
+              flex: 1,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "auto",
+              padding: "0.5rem",
+            }}
+          >
+
           <div
             style={{
               display: "flex",
-              flexDirection: "row",
-              flexWrap: "wrap",
-              gap: "1rem",
-              alignItems: "flex-start",
+              flexDirection: "column",
+              gap: "0.75rem",
               width: "100%",
             }}
           >
             <div
               style={{
-                flex: "1 1 320px",
-                minWidth: 0,
-                maxWidth: "min(560px, 100%)",
                 width: "100%",
+                minWidth: 0,
               }}
             >
           <div
@@ -4924,1062 +5370,7 @@ export const App: React.FC = () => {
             </div>
           )}
             </div>
-            {file && (
-              <div
-                style={{
-                  flex: "1 1 240px",
-                  minWidth: "min(280px, 100%)",
-                  maxWidth: "100%",
-                  maxHeight: 560,
-                  overflowY: "auto",
-                  overflowX: "hidden",
-                  boxSizing: "border-box",
-                  padding: "0.75rem 0.85rem",
-                  borderRadius: "0.65rem",
-                  background: "rgba(15,23,42,0.55)",
-                  border: "1px solid rgba(148,163,184,0.35)",
-                  alignSelf: "stretch",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "0.4rem",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: "0.75rem",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      color: "#9ca3af",
-                    }}
-                  >
-                    Gate Hierarchy
-                  </div>
-                  {/* Q-1: Apply gates to other samples button */}
-                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                    {/* Q-4: Compensation button */}
-                    {file && (
-                      <button
-                        type="button"
-                        onClick={() => setCompensationModalOpen(true)}
-                        title="View compensation matrix"
-                        style={{
-                          padding: "0.2rem 0.5rem",
-                          borderRadius: "0.3rem",
-                          border: "1px solid rgba(168,85,247,0.4)",
-                          fontSize: "0.68rem",
-                          cursor: "pointer",
-                          background: "rgba(168,85,247,0.1)",
-                          color: "#d8b4fe",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        🔬 Comp
-                      </button>
-                    )}
-                    {/* Q-3: Save layout button */}
-                    {gateTree.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSaveLayoutName("");
-                          setSaveLayoutModalOpen(true);
-                        }}
-                        title="Save current gate layout as template"
-                        style={{
-                          padding: "0.2rem 0.5rem",
-                          borderRadius: "0.3rem",
-                          border: "1px solid rgba(34,197,94,0.4)",
-                          fontSize: "0.68rem",
-                          cursor: "pointer",
-                          background: "rgba(34,197,94,0.1)",
-                          color: "#86efac",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        💾 Save
-                      </button>
-                    )}
-                    {/* Q-3: Load layout dropdown */}
-                    {savedLayouts.length > 0 && (
-                      <select
-                        disabled={loadLayoutLoading}
-                        onChange={async (e) => {
-                          if (!e.target.value || !file) return;
-                          setLoadLayoutLoading(true);
-                          try {
-                            const res = await fetch(
-                              `${API_BASE}/api/layouts/${encodeURIComponent(e.target.value)}/apply?target_file_id=${encodeURIComponent(file.id)}`,
-                              { method: "POST" },
-                            );
-                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                            const result = await res.json();
-                            setGateMessage(`✓ Applied ${result.gates_applied} gates from "${result.layout_name}"`);
-                            await fetchGateTree(file.id);
-                          } catch (err) {
-                            const msg = err instanceof Error ? err.message : String(err);
-                            setGateMessage(`Error applying layout: ${msg}`);
-                          } finally {
-                            setLoadLayoutLoading(false);
-                            e.target.value = "";
-                          }
-                        }}
-                        style={{
-                          padding: "0.2rem 0.4rem",
-                          borderRadius: "0.3rem",
-                          border: "1px solid rgba(96,165,250,0.4)",
-                          fontSize: "0.68rem",
-                          cursor: "pointer",
-                          background: "rgba(96,165,250,0.1)",
-                          color: "#60a5fa",
-                          opacity: loadLayoutLoading ? 0.6 : 1,
-                        }}
-                      >
-                        <option value="">📥 Load layout...</option>
-                        {savedLayouts.map((layout) => (
-                          <option key={layout.id} value={layout.id}>
-                            {layout.name} ({layout.gate_count} gates)
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    {/* S-4: Delete layout button */}
-                    {savedLayouts.length > 0 && (
-                      <select
-                        onChange={async (e) => {
-                          if (!e.target.value) return;
-                          const layoutId = e.target.value;
-                          const layout = savedLayouts.find((l) => l.id === layoutId);
-                          if (!layout) return;
-                          if (!window.confirm(`Delete layout "${layout.name}"?`)) { e.target.value = ""; return; }
-                          try {
-                            const res = await fetch(`${API_BASE}/api/layouts/${encodeURIComponent(layoutId)}`, { method: "DELETE" });
-                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                            const updated = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
-                            setSavedLayouts(updated);
-                            setGateMessage("✓ Layout deleted");
-                          } catch (err) {
-                            setGateMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-                          }
-                          e.target.value = "";
-                        }}
-                        style={{
-                          padding: "0.2rem 0.4rem",
-                          borderRadius: "0.3rem",
-                          border: "1px solid rgba(239,68,68,0.35)",
-                          fontSize: "0.68rem",
-                          cursor: "pointer",
-                          background: "rgba(239,68,68,0.08)",
-                          color: "#fca5a5",
-                        }}
-                      >
-                        <option value="">🗑 Delete...</option>
-                        {savedLayouts.map((layout) => (
-                          <option key={layout.id} value={layout.id}>
-                            {layout.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    {gateTree.length > 0 && allFiles.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setApplyGatesTargets(new Set());
-                          setApplyGatesModalOpen(true);
-                          setApplyGatesMessage("");
-                        }}
-                        title="Apply current gate layout to other samples"
-                        style={{
-                          padding: "0.2rem 0.5rem",
-                          borderRadius: "0.3rem",
-                          border: "1px solid rgba(147,51,234,0.4)",
-                          fontSize: "0.68rem",
-                          cursor: "pointer",
-                          background: "rgba(147,51,234,0.1)",
-                          color: "#c084fc",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        ⤵ Apply
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <GateTreePanel
-                  tree={gateTree}
-                  totalEvents={file.event_count}
-                  activeGateId={activeGateId}
-                  loading={gateTreeLoading}
-                  error={gateTreeError}
-                  onSelectGate={(id) => {
-                    setActiveGateId(id);
-                    setDrawMode(false);
-                    setPendingGate(null);
-                    setDrawingPolygon(null);
-                    setDrawingRect(null);
-                  }}
-                  onDeleteGate={async (id) => {
-                    try {
-                      const res = await fetch(`${API_BASE}/api/gates/${encodeURIComponent(id)}`, {
-                        method: "DELETE",
-                      });
-                      if (!res.ok) {
-                        const text = await res.text();
-                        throw new Error(text || `HTTP ${res.status}`);
-                      }
-                      const deletedNode = findNode(gateTree, id);
-                      if (deletedNode) {
-                        const flat = flattenTree([deletedNode]);
-                        if (flat.some((g) => g.id === activeGateId)) setActiveGateId(null);
-                      }
-                      if (file) await fetchGateTree(file.id);
-                    } catch (err) {
-                      const message = err instanceof Error ? err.message : String(err);
-                      setGateMessage(`Failed to delete gate: ${message}`);
-                    }
-                  }}
-                  onCreateChild={() => {
-                    setDrawMode(true);
-                    setGateTool("rectangle");
-                    setPendingGate(null);
-                    setDrawingPolygon(null);
-                    setDrawingRect(null);
-                  }}
-                  onRenameGate={handleRenameGate}
-                />
-
-                {/* Q-1: Apply gates modal */}
-                {applyGatesModalOpen && (
-                  <div
-                    style={{
-                      position: "fixed",
-                      inset: 0,
-                      background: "rgba(0,0,0,0.5)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      zIndex: 9999,
-                      backdropFilter: "blur(2px)",
-                    }}
-                    onClick={() => !applyGatesLoading && setApplyGatesModalOpen(false)}
-                  >
-                    <div
-                      style={{
-                        background: "#0f172a",
-                        border: "1px solid rgba(148,163,184,0.3)",
-                        borderRadius: "0.5rem",
-                        padding: "clamp(1rem, 3vw, 1.5rem)",
-                        maxWidth: "clamp(260px, 90vw, 450px)",
-                        maxHeight: "min(90vh, 700px)",
-                        overflowY: "auto",
-                        boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
-                        width: "100%",
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div
-                        style={{
-                          fontSize: "0.9rem",
-                          fontWeight: 600,
-                          color: "#e5e7eb",
-                          marginBottom: "1rem",
-                        }}
-                      >
-                        Apply gates to other samples
-                      </div>
-
-                      <div style={{ marginBottom: "1rem", fontSize: "0.8rem", color: "#9ca3af" }}>
-                        Select samples to receive the current gate layout ({gateTree.length} gates):
-                      </div>
-
-                      <div style={{ marginBottom: "1rem", maxHeight: "300px", overflowY: "auto" }}>
-                        {allFiles.filter((f) => f.id !== file?.id).map((f) => (
-                          <label
-                            key={f.id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "0.5rem",
-                              padding: "0.5rem 0.4rem",
-                              cursor: "pointer",
-                              fontSize: "0.8rem",
-                              color: "#cbd5e1",
-                              borderRadius: "0.3rem",
-                              background: applyGatesTargets.has(f.id) ? "rgba(147,51,234,0.15)" : "transparent",
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={applyGatesTargets.has(f.id)}
-                              onChange={(e) => {
-                                const newTargets = new Set(applyGatesTargets);
-                                if (e.target.checked) {
-                                  newTargets.add(f.id);
-                                } else {
-                                  newTargets.delete(f.id);
-                                }
-                                setApplyGatesTargets(newTargets);
-                              }}
-                              style={{ cursor: "pointer" }}
-                            />
-                            <div>
-                              <div style={{ fontWeight: 500 }}>{f.sample_name}</div>
-                              <div style={{ fontSize: "0.7rem", color: "#6b7280" }}>
-                                {f.event_count.toLocaleString()} events
-                              </div>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-
-                      {applyGatesMessage && (
-                        <div
-                          style={{
-                            marginBottom: "1rem",
-                            padding: "0.5rem 0.4rem",
-                            borderRadius: "0.3rem",
-                            fontSize: "0.75rem",
-                            backgroundColor: applyGatesMessage.includes("Error") ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
-                            color: applyGatesMessage.includes("Error") ? "#fca5a5" : "#86efac",
-                          }}
-                        >
-                          {applyGatesMessage}
-                        </div>
-                      )}
-
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "0.5rem",
-                          justifyContent: "flex-end",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setApplyGatesModalOpen(false)}
-                          disabled={applyGatesLoading}
-                          style={{
-                            padding: "0.4rem 0.8rem",
-                            borderRadius: "0.3rem",
-                            border: "1px solid rgba(148,163,184,0.3)",
-                            background: "transparent",
-                            color: "#94a3b8",
-                            fontSize: "0.8rem",
-                            cursor: "pointer",
-                            opacity: applyGatesLoading ? 0.5 : 1,
-                          }}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (applyGatesTargets.size === 0) {
-                              setApplyGatesMessage("Select at least one sample");
-                              return;
-                            }
-                            setApplyGatesLoading(true);
-                            setApplyGatesMessage("");
-                            try {
-                              const targetIds = Array.from(applyGatesTargets);
-                              const params = new URLSearchParams({
-                                source_file_id: file!.id,
-                              });
-                              targetIds.forEach((id) => params.append("target_file_ids", id));
-                              const res = await fetch(`${API_BASE}/api/gates/copy?${params}`, {
-                                method: "POST",
-                              });
-                              if (!res.ok) {
-                                const text = await res.text();
-                                throw new Error(text || `HTTP ${res.status}`);
-                              }
-                              const result = await res.json();
-                              setApplyGatesMessage(
-                                `✓ Applied ${result.total_gates_copied} gates to ${targetIds.length} sample${targetIds.length === 1 ? "" : "s"}`,
-                              );
-                              setTimeout(() => setApplyGatesModalOpen(false), 2000);
-                            } catch (err) {
-                              const message = err instanceof Error ? err.message : String(err);
-                              setApplyGatesMessage(`Error: ${message}`);
-                            } finally {
-                              setApplyGatesLoading(false);
-                            }
-                          }}
-                          disabled={applyGatesTargets.size === 0 || applyGatesLoading}
-                          style={{
-                            padding: "0.4rem 0.8rem",
-                            borderRadius: "0.3rem",
-                            border: "1px solid rgba(147,51,234,0.5)",
-                            background: "rgba(147,51,234,0.2)",
-                            color: "#c084fc",
-                            fontSize: "0.8rem",
-                            cursor: applyGatesTargets.size === 0 || applyGatesLoading ? "not-allowed" : "pointer",
-                            opacity: applyGatesTargets.size === 0 || applyGatesLoading ? 0.5 : 1,
-                          }}
-                        >
-                          {applyGatesLoading ? "Applying..." : "Apply"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Q-3: Save layout modal */}
-                {saveLayoutModalOpen && (
-                  <div
-                    style={{
-                      position: "fixed",
-                      inset: 0,
-                      background: "rgba(0,0,0,0.5)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      zIndex: 9999,
-                      backdropFilter: "blur(2px)",
-                    }}
-                    onClick={() => !saveLayoutLoading && setSaveLayoutModalOpen(false)}
-                  >
-                    <div
-                      style={{
-                        background: "#0f172a",
-                        border: "1px solid rgba(148,163,184,0.3)",
-                        borderRadius: "0.5rem",
-                        padding: "clamp(1rem, 3vw, 1.5rem)",
-                        maxWidth: "clamp(250px, 90vw, 420px)",
-                        boxShadow: "0 20px 25px rgba(0,0,0,0.5)",
-                        width: "100%",
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div
-                        style={{
-                          fontSize: "0.9rem",
-                          fontWeight: 600,
-                          color: "#e5e7eb",
-                          marginBottom: "1rem",
-                        }}
-                      >
-                        Save gate layout as template
-                      </div>
-
-                      <input
-                        type="text"
-                        placeholder="Layout name (e.g., 'Lymphocyte gating')"
-                        value={saveLayoutName}
-                        onChange={(e) => setSaveLayoutName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && saveLayoutName.trim()) {
-                            void (async () => {
-                              setSaveLayoutLoading(true);
-                              try {
-                                const res = await fetch(`${API_BASE}/api/layouts`, {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    name: saveLayoutName,
-                                    source_file_id: file!.id,
-                                  }),
-                                });
-                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                                const layout = await res.json();
-                                // Refresh layouts list
-                                const list = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
-                                setSavedLayouts(list);
-                                setSaveLayoutModalOpen(false);
-                                setGateMessage(`✓ Saved layout "${layout.name}"`);
-                              } catch (err) {
-                                const msg = err instanceof Error ? err.message : String(err);
-                                setGateMessage(`Error saving layout: ${msg}`);
-                              } finally {
-                                setSaveLayoutLoading(false);
-                              }
-                            })();
-                          }
-                        }}
-                        style={{
-                          width: "100%",
-                          padding: "0.5rem 0.6rem",
-                          borderRadius: "0.3rem",
-                          border: "1px solid rgba(148,163,184,0.3)",
-                          background: "rgba(30,41,59,0.8)",
-                          color: "#e5e7eb",
-                          fontSize: "0.85rem",
-                          marginBottom: "1rem",
-                          boxSizing: "border-box",
-                        }}
-                        disabled={saveLayoutLoading}
-                        autoFocus
-                      />
-
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "0.5rem",
-                          justifyContent: "flex-end",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setSaveLayoutModalOpen(false)}
-                          disabled={saveLayoutLoading}
-                          style={{
-                            padding: "0.4rem 0.8rem",
-                            borderRadius: "0.3rem",
-                            border: "1px solid rgba(148,163,184,0.3)",
-                            background: "transparent",
-                            color: "#94a3b8",
-                            fontSize: "0.8rem",
-                            cursor: "pointer",
-                            opacity: saveLayoutLoading ? 0.5 : 1,
-                          }}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!saveLayoutName.trim()) return;
-                            setSaveLayoutLoading(true);
-                            try {
-                              const res = await fetch(`${API_BASE}/api/layouts`, {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  name: saveLayoutName,
-                                  source_file_id: file!.id,
-                                }),
-                              });
-                              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                              const layout = await res.json();
-                              // Refresh layouts list
-                              const list = await fetch(`${API_BASE}/api/layouts`).then((r) => r.json());
-                              setSavedLayouts(list);
-                              setSaveLayoutModalOpen(false);
-                              setGateMessage(`✓ Saved layout "${layout.name}"`);
-                            } catch (err) {
-                              const msg = err instanceof Error ? err.message : String(err);
-                              setGateMessage(`Error saving layout: ${msg}`);
-                            } finally {
-                              setSaveLayoutLoading(false);
-                            }
-                          }}
-                          disabled={!saveLayoutName.trim() || saveLayoutLoading}
-                          style={{
-                            padding: "0.4rem 0.8rem",
-                            borderRadius: "0.3rem",
-                            border: "1px solid rgba(34,197,94,0.5)",
-                            background: "rgba(34,197,94,0.2)",
-                            color: "#86efac",
-                            fontSize: "0.8rem",
-                            cursor: !saveLayoutName.trim() || saveLayoutLoading ? "not-allowed" : "pointer",
-                            opacity: !saveLayoutName.trim() || saveLayoutLoading ? 0.5 : 1,
-                          }}
-                        >
-                          {saveLayoutLoading ? "Saving..." : "Save"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
-
-          {/* G: Statistics Panel */}
-          {file && (
-            <div
-              style={{
-                marginTop: "1rem",
-                borderRadius: "0.75rem",
-                border: "1px solid rgba(148,163,184,0.3)",
-                background: "rgba(15,23,42,0.5)",
-                overflow: "hidden",
-              }}
-            >
-              {/* Panel header / toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !statsExpanded;
-                  setStatsExpanded(next);
-                  // Eagerly fetch if opening with a gate selected
-                  if (next && activeGateId && !gateStats) {
-                    setGateStatsLoading(true);
-                    void getJson<GateStatsData>(`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/stats`)
-                      .then((d) => { setGateStats(d); setGateStatsLoading(false); })
-                      .catch(() => { setGateStats(null); setGateStatsLoading(false); });
-                  }
-                }}
-                style={{
-                  display: "flex",
-                  width: "100%",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "0.5rem 0.85rem",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#e5e7eb",
-                  fontSize: "0.78rem",
-                  textAlign: "left",
-                }}
-              >
-                <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#9ca3af", fontWeight: 600 }}>
-                  Statistics
-                  {activeGateId && gateStats && (
-                    <span style={{ marginLeft: "0.5rem", color: "#64748b", fontWeight: 400, textTransform: "none" }}>
-                      — {gateStats.gate_name} ({gateStats.count.toLocaleString()} events, {gateStats.pct_of_parent.toFixed(1)}% of parent)
-                    </span>
-                  )}
-                </span>
-                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{statsExpanded ? "▲" : "▼"}</span>
-              </button>
-
-              {statsExpanded && (
-                <div style={{ padding: "0 0.85rem 0.75rem" }}>
-                  {!activeGateId && (
-                    <div style={{ fontSize: "0.8rem", color: "#64748b", paddingBottom: "0.5rem" }}>
-                      Select a gate to view per-channel statistics.
-                    </div>
-                  )}
-                  {activeGateId && gateStatsLoading && (
-                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>Loading statistics…</div>
-                  )}
-                  {activeGateId && !gateStatsLoading && gateStats && (
-                    <>
-                      {/* CSV export */}
-                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.4rem" }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const rows = [
-                              ["Gate", gateStats.gate_name],
-                              ["Count", String(gateStats.count)],
-                              ["% of Parent", gateStats.pct_of_parent.toFixed(2)],
-                              ["% of Total", gateStats.pct_total.toFixed(2)],
-                              [],
-                              ["Channel", "MFI (mean)", "Median", "SD", "CV%"],
-                              ...gateStats.channel_stats.map((cs) => [
-                                cs.display_name || cs.channel_name,
-                                cs.mean.toFixed(2),
-                                cs.median.toFixed(2),
-                                cs.sd.toFixed(2),
-                                cs.cv != null ? cs.cv.toFixed(2) : "",
-                              ]),
-                            ];
-                            const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-                            const blob = new Blob([csv], { type: "text/csv" });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = `${gateStats.gate_name.replace(/[^a-z0-9_-]/gi, "_")}_stats.csv`;
-                            a.click();
-                            URL.revokeObjectURL(url);
-                          }}
-                          style={{
-                            padding: "0.2rem 0.55rem",
-                            borderRadius: "0.4rem",
-                            border: "1px solid rgba(148,163,184,0.5)",
-                            fontSize: "0.75rem",
-                            cursor: "pointer",
-                            background: "rgba(30,41,59,0.6)",
-                            color: "#94a3b8",
-                          }}
-                        >
-                          Export CSV
-                        </button>
-                        {/* P-1: Export gated events as CSV */}
-                        {activeGateId && (
-                          <a
-                            href={`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/export-csv`}
-                            download
-                            title={gateStats ? `Download ${gateStats.count.toLocaleString()} events as CSV` : "Download events as CSV"}
-                            style={{
-                              padding: "0.2rem 0.55rem",
-                              borderRadius: "0.4rem",
-                              border: "1px solid rgba(96,165,250,0.45)",
-                              fontSize: "0.75rem",
-                              cursor: "pointer",
-                              background: "rgba(96,165,250,0.1)",
-                              color: "#60a5fa",
-                              textDecoration: "none",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            ↓ Events CSV{gateStats ? ` (${gateStats.count.toLocaleString()})` : ""}
-                          </a>
-                        )}
-                        {/* M: Export gated events as FCS */}
-                        {activeGateId && (
-                          <a
-                            href={`${API_BASE}/api/gates/${encodeURIComponent(activeGateId)}/export-fcs`}
-                            download
-                            style={{
-                              padding: "0.2rem 0.55rem",
-                              borderRadius: "0.4rem",
-                              border: "1px solid rgba(34,197,94,0.45)",
-                              fontSize: "0.75rem",
-                              cursor: "pointer",
-                              background: "rgba(34,197,94,0.1)",
-                              color: "#4ade80",
-                              textDecoration: "none",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            ↓ Export FCS
-                          </a>
-                        )}
-                      </div>
-                      {/* P-3: Stats table — sortable columns + clipboard copy */}
-                      {(() => {
-                        // Sort channel_stats by the active column
-                        const colKey: StatsSortCol = statsSortCol;
-                        const sorted = [...gateStats.channel_stats].sort((a, b) => {
-                          let va: number | string;
-                          let vb: number | string;
-                          if (colKey === "channel") {
-                            va = (a.display_name || a.channel_name).toLowerCase();
-                            vb = (b.display_name || b.channel_name).toLowerCase();
-                          } else if (colKey === "mean") { va = a.mean; vb = b.mean; }
-                          else if (colKey === "median") { va = a.median; vb = b.median; }
-                          else if (colKey === "sd") { va = a.sd; vb = b.sd; }
-                          else { va = a.cv ?? -Infinity; vb = b.cv ?? -Infinity; }
-                          const cmp = va < vb ? -1 : va > vb ? 1 : 0;
-                          return statsSortDir === "asc" ? cmp : -cmp;
-                        });
-
-                        const handleHeaderClick = (col: StatsSortCol) => {
-                          if (statsSortCol === col) {
-                            setStatsSortDir((d) => (d === "asc" ? "desc" : "asc"));
-                          } else {
-                            setStatsSortCol(col);
-                            setStatsSortDir(col === "channel" ? "asc" : "desc");
-                          }
-                        };
-
-                        const sortIcon = (col: StatsSortCol) =>
-                          statsSortCol === col ? (statsSortDir === "asc" ? " ▲" : " ▼") : "";
-
-                        const headers: { label: string; col: StatsSortCol; align: "left" | "right" }[] = [
-                          { label: "Channel", col: "channel", align: "left" },
-                          { label: "MFI", col: "mean", align: "right" },
-                          { label: "Median", col: "median", align: "right" },
-                          { label: "SD", col: "sd", align: "right" },
-                          { label: "CV%", col: "cv", align: "right" },
-                        ];
-
-                        const handleCopy = () => {
-                          const headerRow = headers.map((h) => h.label).join("\t");
-                          const dataRows = sorted.map((cs) =>
-                            [
-                              cs.display_name || cs.channel_name,
-                              cs.mean.toFixed(2),
-                              cs.median.toFixed(2),
-                              cs.sd.toFixed(2),
-                              cs.cv != null ? cs.cv.toFixed(2) : "",
-                            ].join("\t"),
-                          );
-                          void navigator.clipboard.writeText([headerRow, ...dataRows].join("\n"));
-                        };
-
-                        return (
-                          <>
-                            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.25rem" }}>
-                              <button
-                                type="button"
-                                onClick={handleCopy}
-                                title="Copy table to clipboard (tab-separated)"
-                                style={{
-                                  padding: "0.15rem 0.45rem",
-                                  borderRadius: "0.35rem",
-                                  border: "1px solid rgba(148,163,184,0.35)",
-                                  background: "transparent",
-                                  color: "#94a3b8",
-                                  fontSize: "0.72rem",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                📋 Copy
-                              </button>
-                            </div>
-                            <div style={{ overflowX: "auto" }}>
-                              <table
-                                style={{
-                                  width: "100%",
-                                  borderCollapse: "collapse",
-                                  fontSize: "0.75rem",
-                                  color: "#e5e7eb",
-                                }}
-                              >
-                                <thead>
-                                  <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
-                                    {headers.map(({ label, col, align }) => (
-                                      <th
-                                        key={col}
-                                        onClick={() => handleHeaderClick(col)}
-                                        style={{
-                                          padding: "0.25rem 0.4rem",
-                                          textAlign: align,
-                                          color: statsSortCol === col ? "#c4b5fd" : "#9ca3af",
-                                          fontWeight: statsSortCol === col ? 600 : 500,
-                                          whiteSpace: "nowrap",
-                                          cursor: "pointer",
-                                          userSelect: "none",
-                                        }}
-                                      >
-                                        {label}{sortIcon(col)}
-                                      </th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {sorted.map((cs, i) => (
-                                    <tr
-                                      key={cs.channel_name}
-                                      style={{
-                                        background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
-                                      }}
-                                    >
-                                      <td
-                                        style={{
-                                          padding: "0.2rem 0.4rem",
-                                          color: "#cbd5e1",
-                                          maxWidth: "12rem",
-                                          overflow: "hidden",
-                                          textOverflow: "ellipsis",
-                                          whiteSpace: "nowrap",
-                                        }}
-                                        title={cs.display_name || cs.channel_name}
-                                      >
-                                        {cs.display_name || cs.channel_name}
-                                      </td>
-                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                        {cs.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                                      </td>
-                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                        {cs.median.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                                      </td>
-                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                        {cs.sd.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                                      </td>
-                                      <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: cs.cv != null && cs.cv > 100 ? "#fbbf24" : "#e5e7eb" }}>
-                                        {cs.cv != null ? cs.cv.toFixed(1) : "—"}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
-              )}
-
-          {/* Q-2: Populations summary report */}
-          {file && (
-            <div
-              style={{
-                marginTop: "1rem",
-                borderRadius: "0.75rem",
-                overflow: "hidden",
-                border: "1px solid rgba(100,116,139,0.35)",
-                background: "rgba(15,23,42,0.5)",
-              }}
-            >
-              {/* Panel header / toggle */}
-              <button
-                type="button"
-                onClick={() => setPopExpanded((x) => !x)}
-                style={{
-                  display: "flex",
-                  width: "100%",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "0.5rem 0.85rem",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#e5e7eb",
-                  fontSize: "0.78rem",
-                  textAlign: "left",
-                }}
-              >
-                <span style={{ textTransform: "uppercase", letterSpacing: "0.08em", color: "#9ca3af", fontWeight: 600 }}>
-                  Populations ({gateList.length})
-                </span>
-                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{popExpanded ? "▲" : "▼"}</span>
-              </button>
-
-              {popExpanded && (
-                <div style={{ padding: "0 0.85rem 0.75rem" }}>
-                  {gateList.length === 0 ? (
-                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                      No gates yet — draw gates to see population summary.
-                    </div>
-                  ) : (
-                    (() => {
-                      // Sort gates by active column
-                      const sorted = [...gateList].sort((a, b) => {
-                        let va: number | string;
-                        let vb: number | string;
-                        if (popSortCol === "name") {
-                          va = a.name.toLowerCase();
-                          vb = b.name.toLowerCase();
-                        } else if (popSortCol === "count") {
-                          va = a.count;
-                          vb = b.count;
-                        } else if (popSortCol === "pct_parent") {
-                          va = a.pct_of_parent ?? 0;
-                          vb = b.pct_of_parent ?? 0;
-                        } else {
-                          va = a.pct_of_total ?? 0;
-                          vb = b.pct_of_total ?? 0;
-                        }
-                        const cmp = va < vb ? -1 : va > vb ? 1 : 0;
-                        return popSortDir === "asc" ? cmp : -cmp;
-                      });
-
-                      const handleHeaderClick = (col: PopulationSortCol) => {
-                        if (popSortCol === col) {
-                          setPopSortDir((d) => (d === "asc" ? "desc" : "asc"));
-                        } else {
-                          setPopSortCol(col);
-                          setPopSortDir("desc");
-                        }
-                      };
-
-                      const sortIcon = (col: PopulationSortCol) =>
-                        popSortCol === col ? (popSortDir === "asc" ? " ▲" : " ▼") : "";
-
-                      const handleExport = () => {
-                        const header = ["Gate", "Count", "% Parent", "% Total"].join("\t");
-                        const rows = sorted.map((g) =>
-                          [g.name, g.count, (g.pct_of_parent ?? 0).toFixed(1), (g.pct_of_total ?? 0).toFixed(1)].join("\t"),
-                        );
-                        void navigator.clipboard.writeText([header, ...rows].join("\n"));
-                      };
-
-                      return (
-                        <>
-                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.25rem", gap: "0.5rem" }}>
-                            <button
-                              type="button"
-                              onClick={handleExport}
-                              title="Copy to clipboard (tab-separated)"
-                              style={{
-                                padding: "0.15rem 0.45rem",
-                                borderRadius: "0.35rem",
-                                border: "1px solid rgba(148,163,184,0.35)",
-                                background: "transparent",
-                                color: "#94a3b8",
-                                fontSize: "0.72rem",
-                                cursor: "pointer",
-                              }}
-                            >
-                              📋 Copy
-                            </button>
-                          </div>
-                          <div style={{ overflowX: "auto", fontSize: "0.75rem" }}>
-                            <table
-                              style={{
-                                width: "100%",
-                                borderCollapse: "collapse",
-                                color: "#e5e7eb",
-                              }}
-                            >
-                              <thead>
-                                <tr style={{ borderBottom: "1px solid rgba(148,163,184,0.3)" }}>
-                                  {(["Gate", "Count", "% Parent", "% Total"] as const).map((label, idx) => {
-                                    const col: PopulationSortCol = ["name", "count", "pct_parent", "pct_total"][idx] as PopulationSortCol;
-                                    return (
-                                      <th
-                                        key={label}
-                                        onClick={() => handleHeaderClick(col)}
-                                        style={{
-                                          padding: "0.25rem 0.4rem",
-                                          textAlign: label === "Gate" ? "left" : "right",
-                                          color: popSortCol === col ? "#c4b5fd" : "#9ca3af",
-                                          fontWeight: popSortCol === col ? 600 : 500,
-                                          whiteSpace: "nowrap",
-                                          cursor: "pointer",
-                                          userSelect: "none",
-                                        }}
-                                      >
-                                        {label}{sortIcon(col)}
-                                      </th>
-                                    );
-                                  })}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {sorted.map((g, i) => (
-                                  <tr
-                                    key={g.id}
-                                    onClick={() => {
-                                      setActiveGateId(g.id);
-                                      setDrawMode(false);
-                                      setPendingGate(null);
-                                      setDrawingPolygon(null);
-                                      setDrawingRect(null);
-                                    }}
-                                    style={{
-                                      background: i % 2 === 0 ? "transparent" : "rgba(148,163,184,0.04)",
-                                      cursor: "pointer",
-                                      opacity: activeGateId === g.id ? 1 : 0.7,
-                                    }}
-                                  >
-                                    <td
-                                      style={{
-                                        padding: "0.2rem 0.4rem",
-                                        color: activeGateId === g.id ? "#c4b5fd" : "#cbd5e1",
-                                        maxWidth: "10rem",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                        fontWeight: activeGateId === g.id ? 500 : 400,
-                                      }}
-                                      title={g.name}
-                                    >
-                                      {g.name}
-                                    </td>
-                                    <td
-                                      style={{
-                                        padding: "0.2rem 0.4rem",
-                                        textAlign: "right",
-                                        fontVariantNumeric: "tabular-nums",
-                                      }}
-                                    >
-                                      {g.count.toLocaleString()}
-                                    </td>
-                                    <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                      {(g.pct_of_parent ?? 0).toFixed(1)}%
-                                    </td>
-                                    <td style={{ padding: "0.2rem 0.4rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                      {(g.pct_of_total ?? 0).toFixed(1)}%
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </>
-                      );
-                    })()
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-            </div>
-          )}
 
           {/* P-1: Plate layout panel */}
           <div
@@ -6813,9 +6204,10 @@ export const App: React.FC = () => {
               onClick={() => setCompensationModalOpen(false)}
             />
           )}
-        </div>
-        </div>
-      </div>
+          </div>{/* ── end CENTER CANVAS ── */}
+        </div>{/* ── end INNER FLEX ROW ── */}
+        </div>{/* ── end CENTER+INSPECTOR OUTER ── */}
+      </div>{/* ── end MAIN BODY ── */}
 
       {/* U: Layout Editor overlay modal */}
       {layoutEditorOpen && (
@@ -6915,4 +6307,3 @@ export const App: React.FC = () => {
     </div>
   );
 }
-

@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "jsx": "react-jsx",
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "noEmit": true,
+    "typeRoots": [
+      "C:/Users/user837/FreeCyto/.claude/worktrees/pedantic-tesla-25ed2d/frontend/node_modules/@types",
+      "C:/Users/user837/FreeCyto/.claude/worktrees/pedantic-tesla-25ed2d/frontend/node_modules"
+    ],
+    "paths": {
+      "react": ["C:/Users/user837/FreeCyto/.claude/worktrees/pedantic-tesla-25ed2d/frontend/node_modules/react"],
+      "react/jsx-runtime": ["C:/Users/user837/FreeCyto/.claude/worktrees/pedantic-tesla-25ed2d/frontend/node_modules/react/jsx-runtime"],
+      "react/*": ["C:/Users/user837/FreeCyto/.claude/worktrees/pedantic-tesla-25ed2d/frontend/node_modules/react/*"]
+    }
+  },
+  "include": [
+    "src/types/layout.ts",
+    "src/components/Editors/LayoutEditor.tsx",
+    "src/components/Editors/TemplateMetadataEditor.tsx",
+    "src/components/Editors/WorkflowDesigner.tsx",
+    "src/components/Panels/LayoutEditorPanel.tsx"
+  ]
+}

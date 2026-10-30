@@ -1561,7 +1561,7 @@ export const App: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: "flex-start",
         fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         background:
           "radial-gradient(circle at top, #0f172a 0, #020617 45%, #020617 100%)",
@@ -1570,7 +1570,97 @@ export const App: React.FC = () => {
         boxSizing: "border-box",
       }}
     >
-          <div
+      {/* Top toolbar — FreeCyto-style editor buttons */}
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
+          display: "flex",
+          gap: "0.75rem",
+          padding: "0.75rem 1rem",
+          borderRadius: 0,
+          background: "rgba(15,23,42,0.95)",
+          border: "none",
+          borderBottom: "1px solid rgba(148,163,184,0.3)",
+          width: "100%",
+          maxWidth: "none",
+          flexWrap: "wrap",
+          marginLeft: "calc(-1 * clamp(1rem, 3vw, 2.5rem))",
+          marginRight: "calc(-1 * clamp(1rem, 3vw, 2.5rem))",
+          paddingLeft: "clamp(1rem, 3vw, 2.5rem)",
+          paddingRight: "clamp(1rem, 3vw, 2.5rem)",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setTablePanelOpen(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(148,163,184,0.4)",
+            background: tablePanelOpen ? "rgba(251,191,36,0.2)" : "transparent",
+            color: "#fbbf24",
+            fontSize: "0.9rem",
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          <span>📊</span>
+          <span>Table Editor</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setLayoutEditorOpen(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(148,163,184,0.4)",
+            background: layoutEditorOpen ? "rgba(167,139,250,0.2)" : "transparent",
+            color: "#a78bfa",
+            fontSize: "0.9rem",
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          <span>🗂</span>
+          <span>Layout Editor</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPlatePanelOpen(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(148,163,184,0.4)",
+            background: platePanelOpen ? "rgba(96,165,250,0.2)" : "transparent",
+            color: "#60a5fa",
+            fontSize: "0.9rem",
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          <span>📋</span>
+          <span>Plate Editor</span>
+        </button>
+      </div>
+
+      <div
             style={{
               display: "grid",
               gridTemplateColumns: "minmax(240px, 280px) minmax(0, 1fr)",
@@ -1609,7 +1699,7 @@ export const App: React.FC = () => {
               color: "#e5e7eb",
             }}
           >
-            OpenCyto Studio
+            FreeCyto Studio
           </h1>
           <p
             style={{
@@ -2179,58 +2269,6 @@ export const App: React.FC = () => {
                 <ExperimentTree />
               </div>
             )}
-          </div>
-
-          {/* T: Table Panel toggle (Phase T) */}
-          <div style={{ marginBottom: "0.8rem" }}>
-            <button
-              type="button"
-              onClick={() => setTablePanelOpen(true)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                width: "100%",
-                textAlign: "left",
-                padding: "0.3rem 0.5rem",
-                borderRadius: "0.55rem",
-                border: "1px solid rgba(148,163,184,0.35)",
-                background: "transparent",
-                color: "#fbbf24",
-                fontSize: "0.78rem",
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              <span>📊</span>
-              <span>Table Editor</span>
-            </button>
-          </div>
-
-          {/* U: Layout Editor toggle (Phase U) */}
-          <div style={{ marginBottom: "0.8rem" }}>
-            <button
-              type="button"
-              onClick={() => setLayoutEditorOpen(true)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                width: "100%",
-                textAlign: "left",
-                padding: "0.3rem 0.5rem",
-                borderRadius: "0.55rem",
-                border: "1px solid rgba(148,163,184,0.35)",
-                background: "transparent",
-                color: "#a78bfa",
-                fontSize: "0.78rem",
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              <span>🗂</span>
-              <span>Layout Editor</span>
-            </button>
           </div>
 
           {/* K: Sample groups panel */}
@@ -6871,6 +6909,84 @@ export const App: React.FC = () => {
           {/* Panel content */}
           <div style={{ flex: 1, overflow: "hidden" }}>
             <TablePanel />
+          </div>
+        </div>
+      )}
+
+      {/* Plate Editor overlay modal — shortcut to Plate Wells tab */}
+      {platePanelOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            flexDirection: "column",
+            background: "rgba(0,0,0,0.7)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "8px 16px",
+              background: "#0e0e1a",
+              borderBottom: "1px solid #333",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#60a5fa" }}>
+              📋 Plate Editor
+            </span>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => setPlatePanelOpen(false)}
+              style={{
+                background: "none",
+                border: "1px solid #444",
+                borderRadius: 4,
+                color: "#ccc",
+                cursor: "pointer",
+                fontSize: 13,
+                padding: "3px 12px",
+              }}
+            >
+              Close
+            </button>
+          </div>
+          <div style={{ flex: 1, overflow: "hidden", background: "#fff" }}>
+            <div style={{ padding: "12px 14px" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8, color: "#333" }}>
+                Plate Well Management
+              </div>
+              <p style={{ color: "#666", fontSize: 13, marginBottom: 12 }}>
+                Use the Table Editor to manage plate well assignments. Go to the <strong>Plate Wells</strong> tab for:
+              </p>
+              <ul style={{ color: "#666", fontSize: 13, marginLeft: 20, marginBottom: 12 }}>
+                <li>View and edit well assignments</li>
+                <li>Assign FCS files to wells</li>
+                <li>Label wells and plates</li>
+                <li>Export well assignments as CSV</li>
+              </ul>
+              <button
+                onClick={() => {
+                  setTablePanelOpen(true);
+                  setPlatePanelOpen(false);
+                }}
+                style={{
+                  padding: "8px 16px",
+                  background: "#0066cc",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                Open Table Editor → Plate Wells
+              </button>
+            </div>
           </div>
         </div>
       )}
